@@ -11,7 +11,7 @@ doctest = false
 
 
 [dependencies]
-alacritty_terminal = "0.22.0"
+alacritty_terminal = { path = "/Users/someonetoignore/work/alacritty/alacritty_terminal" }
 anyhow.workspace = true
 collections.workspace = true
 dirs = "4.0.0"
