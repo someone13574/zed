@@ -338,6 +338,7 @@ impl EditorElement {
         register_action(view, cx, Editor::display_cursor_names);
         register_action(view, cx, Editor::unique_lines_case_insensitive);
         register_action(view, cx, Editor::unique_lines_case_sensitive);
+        register_action(view, cx, Editor::revert_selected_chunks);
     }
 
     fn register_key_listeners(
