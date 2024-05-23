@@ -52,8 +52,8 @@ def convert_body(body: str) -> str:
         formatted += "</ul>\n"
     return formatted
 
-def get_release_info(tag: str):
-    url = f"https://api.github.com/repos/zed-industries/zed/releases/tags/{tag}"
+def get_release_info(repo: str, tag: str):
+    url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
     response = requests.get(url)
     if response.status_code == 200:
         return response.json()
@@ -65,14 +65,18 @@ def get_release_info(tag: str):
 if __name__ == "__main__":
     os.chdir(sys.path[0])
 
-    if len(sys.argv) != 3:
-        print("Usage: python convert-release-notes.py <tag> <channel>")
+    if len(sys.argv) != 3 and len(sys.argv) != 4:
+        print("Usage: python convert-release-notes.py <tag> <channel> <optional-repo>")
         sys.exit(1)
 
     tag = sys.argv[1]
     channel = sys.argv[2]
+    try:
+        repo = sys.argv[3]
+    except:
+        repo = "zed-industries/zed"
 
-    release_info = get_release_info(tag)
+    release_info = get_release_info(repo, tag)
     body = convert_body(release_info["body"])
     version = tag.removeprefix("v")
     date = release_info["published_at"]
@@ -81,7 +85,7 @@ if __name__ == "__main__":
     release_info_str += f"    <description>\n"
     release_info_str += textwrap.indent(body, " " * 8)
     release_info_str += f"    </description>\n"
-    release_info_str += f"    <url>https://github.com/zed-industries/zed/releases/tag/{tag}</url>\n"
+    release_info_str += f"    <url>https://github.com/{repo}/releases/tag/{tag}</url>\n"
     release_info_str += "</release>\n"
 
     channel_releases_file = f"../../crates/zed/resources/flatpak/release-info/{channel}"

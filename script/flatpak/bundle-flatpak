@@ -5,7 +5,12 @@ cd "$(dirname "$0")/../.."
 shopt -s extglob
 
 rm -f target/release/zed-+([-a-zA-Z0-9])-linux-x86_64.tar.gz
-script/bundle-linux
+if [[ "$#" -eq 1 ]]; then
+    curl -L -v "$1" > target/release/zed-linux-x86_64.tar.gz
+else
+    script/bundle-linux
+fi
+
 archive=$(ls "target/release" | grep -E 'zed(-[a-zA-Z0-9]+)?-linux-x86_64\.tar\.gz')
 channel=$(<crates/zed/RELEASE_CHANNEL)
 

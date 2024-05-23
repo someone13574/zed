@@ -1,0 +1,39 @@
+on:
+  release:
+    types: [prereleased]
+
+jobs:
+  bundle_preview:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: flatpak-release-action
+
+      - name: Install Flatpak dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak
+          script/flatpak/deps
+
+      - name: Convert release notes to XML
+        run: python script/flatpak/convert-release-notes.py ${{ github.event.release.tag_name }} preview
+
+      - name: Build flatpak bundle from linux bundle
+        run: script/flatpak/bundle-flatpak https://github.com/${{ github.repository }}/releases/download/${{ github.event.release.id }}/zed-linux-x86_64.tar.gz
+
+      - name: Upload bundle
+        uses: softprops/action-gh-release@v1
+        with:
+          files: target/release/dev.zed.Zed-Preview.flatpak
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Commit release notes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "Github Actions"
+          git add crates/zed/resources/flatpak/release-info/preview
+          git commit -m "Update flatpak-preview release notes to ${{ github.event.release.tag_name }}"
+          git push
