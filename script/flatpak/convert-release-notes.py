@@ -58,8 +58,7 @@ def get_release_info(repo: str, tag: str):
     if response.status_code == 200:
         return response.json()
     else:
-        print(f"Failed to fetch release info for tag '{tag}'. Status code: {response.status_code}")
-        quit()
+        sys.exit(f"Failed to fetch release info for tag '{tag}'. Status code: {response.status_code}")
 
 
 if __name__ == "__main__":

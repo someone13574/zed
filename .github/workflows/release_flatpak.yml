@@ -1,3 +1,5 @@
+name: Release Flatpak
+
 on:
   release:
     types: [prereleased]
@@ -18,7 +20,7 @@ jobs:
           script/flatpak/deps
 
       - name: Convert release notes to XML
-        run: python script/flatpak/convert-release-notes.py ${{ github.event.release.tag_name }} preview
+        run: python script/flatpak/convert-release-notes.py ${{ github.event.release.tag_name }} preview ${{ github.repository }}
 
       - name: Build flatpak bundle from linux bundle
         run: script/flatpak/bundle-flatpak https://github.com/${{ github.repository }}/releases/download/${{ github.event.release.id }}/zed-linux-x86_64.tar.gz
