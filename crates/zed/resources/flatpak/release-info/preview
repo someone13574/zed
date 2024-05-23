@@ -1,0 +1,23 @@
+        <release version="533.645.214-testing" date="2024-05-23T02:45:34Z">
+            <description>
+                <p># Very good test release</p>
+                <ul>
+                    <li>Testing actions 1</li>
+                    <li>Testing actions 2</li>
+                    <li>Testing actions 3</li>
+                    <li>Testing actions 4</li>
+                    <li>Testing actions 5</li>
+                    <li>Added flatpak bundle action for preview releases</li>
+                </ul>
+                <ul>
+                    <li><code>    ```</code></li>
+                    <li><code>    wow, you can have code as well?</code></li>
+                    <li><code>        indented</code></li>
+                    <li><code>    simply amazing</code></li>
+                    <li><code>    ```</code></li>
+                </ul>
+                <p>this better work</p>
+                <p>this is a test</p>
+            </description>
+            <url>https://github.com/someone13574/zed/releases/tag/v533.645.214-testing</url>
+        </release>
