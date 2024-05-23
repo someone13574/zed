@@ -23,7 +23,7 @@ jobs:
         run: python script/flatpak/convert-release-notes.py ${{ github.event.release.tag_name }} preview ${{ github.repository }}
 
       - name: Build flatpak bundle from linux bundle
-        run: script/flatpak/bundle-flatpak https://github.com/${{ github.repository }}/releases/download/${{ github.event.release.id }}/zed-linux-x86_64.tar.gz
+        run: script/flatpak/bundle-flatpak https://github.com/${{ github.repository }}/releases/download/${{ github.event.release.tag_name }}/zed-linux-x86_64.tar.gz
 
       - name: Upload bundle
         uses: softprops/action-gh-release@v1
