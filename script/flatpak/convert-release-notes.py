@@ -4,12 +4,13 @@ import sys
 import textwrap
 import os
 
-def clean_line(line: str) -> str:
+def clean_line(line: str, strip: bool) -> str:
     line = re.sub(r"<", "&lt;", line)
     line = re.sub(r">", "&gt;", line)
     line = re.sub(r"\(\[(#\d+)\]\([\w|\d\:|\/|\.|\-|_]*\)\)", lambda match: f"[{match.group(1)}]", line)
     line = re.sub(r"\[(#\d+)\]\([\w|\d\:|\/|\.|\-|_]*\)", lambda match: f"[{match.group(1)}]", line)
-    line = line.strip()
+    if strip:
+        line = line.strip()
 
     return line
 
@@ -20,7 +21,7 @@ def convert_body(body: str) -> str:
     in_code_fence = False
     in_list = False
     for line in body.splitlines():
-        line = clean_line(line)
+        line = clean_line(line, not in_code_fence)
         if not line:
             continue
         if re.search(r'\[[\w|\d|:|\/|\.|\-|_]*\]\([\w|\d|:|\/|\.|\-|_]*\)', line):
