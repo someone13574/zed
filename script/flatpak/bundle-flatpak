@@ -6,6 +6,7 @@ shopt -s extglob
 
 rm -f target/release/zed-+([-a-zA-Z0-9])-linux-x86_64.tar.gz
 if [[ "$#" -eq 1 ]]; then
+    mkdir -p target/release
     curl -L -v "$1" > target/release/zed-linux-x86_64.tar.gz
 else
     script/bundle-linux
