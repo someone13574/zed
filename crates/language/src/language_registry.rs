@@ -148,9 +148,10 @@ struct LspBinaryStatusSender {
     txs: Arc<Mutex<Vec<mpsc::UnboundedSender<(LanguageServerName, LanguageServerBinaryStatus)>>>>,
 }
 
+type DownloadPermissionData = (String, String, mpsc::UnboundedSender<bool>);
 #[derive(Default)]
 struct DownloadPermissionChannel {
-    txs: Arc<Mutex<Vec<mpsc::UnboundedSender<(String, mpsc::UnboundedSender<bool>)>>>>,
+    txs: Arc<Mutex<Vec<mpsc::UnboundedSender<DownloadPermissionData>>>>,
 }
 
 impl LanguageRegistry {
@@ -867,14 +868,14 @@ impl LanguageRegistry {
         self.lsp_binary_status_tx.subscribe()
     }
 
-    pub fn download_request_rx(
-        &self,
-    ) -> mpsc::UnboundedReceiver<(String, mpsc::UnboundedSender<bool>)> {
+    pub fn download_request_rx(&self) -> mpsc::UnboundedReceiver<DownloadPermissionData> {
         self.download_permission_channel.subscribe()
     }
 
-    pub async fn request_download_permission(&self, url: &str) -> bool {
-        self.download_permission_channel.request(url).await
+    pub async fn request_download_permission(&self, url: &str, extension_name: &str) -> bool {
+        self.download_permission_channel
+            .request(url, extension_name)
+            .await
     }
 
     pub fn delete_server_container(
@@ -985,13 +986,13 @@ impl LspBinaryStatusSender {
 }
 
 impl DownloadPermissionChannel {
-    fn subscribe(&self) -> mpsc::UnboundedReceiver<(String, mpsc::UnboundedSender<bool>)> {
+    fn subscribe(&self) -> mpsc::UnboundedReceiver<DownloadPermissionData> {
         let (tx, rx) = mpsc::unbounded();
         self.txs.lock().push(tx);
         rx
     }
 
-    async fn request(&self, url: &str) -> bool {
+    async fn request(&self, url: &str, extension_name: &str) -> bool {
         let mut receiver_rxs = {
             let mut txs = self.txs.lock();
             let (receiver_txs, receiver_rxs): (Vec<_>, Vec<_>) =
@@ -1000,7 +1001,10 @@ impl DownloadPermissionChannel {
                 .iter()
                 .zip(receiver_txs)
                 .filter_map(|(tx, receiver_tx)| {
-                    if tx.unbounded_send((url.to_string(), receiver_tx)).is_ok() {
+                    if tx
+                        .unbounded_send((url.to_string(), extension_name.to_string(), receiver_tx))
+                        .is_ok()
+                    {
                         Some(tx)
                     } else {
                         None

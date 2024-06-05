@@ -10,7 +10,7 @@ use workspace::{
 
 pub(crate) fn download_permission(workspace: &mut Workspace, cx: &mut ViewContext<Workspace>) {
     let mut request_rx = workspace.app_state().languages.download_request_rx();
-    let notification_queue: Model<VecDeque<(String, mpsc::UnboundedSender<bool>)>> =
+    let notification_queue: Model<VecDeque<(String, String, mpsc::UnboundedSender<bool>)>> =
         cx.new_model(|_| VecDeque::new());
 
     cx.observe(&notification_queue, |workspace, queue, cx| {
@@ -18,7 +18,7 @@ pub(crate) fn download_permission(workspace: &mut Workspace, cx: &mut ViewContex
             return;
         }
 
-        while let Some((url, response_tx)) = queue.update(cx, |queue, cx| {
+        while let Some((url, extension_name, response_tx)) = queue.update(cx, |queue, cx| {
             let request = queue.pop_front();
             cx.notify();
             request
@@ -32,7 +32,7 @@ pub(crate) fn download_permission(workspace: &mut Workspace, cx: &mut ViewContex
                 let response_tx_clone = response_tx.clone();
                 cx.new_view(|_cx| {
                     simple_message_notification::MessageNotification::new(format!(
-                        "Allow '{url}' to be downloaded?"
+                        "Allow '{extension_name}' to download '{url}'?"
                     ))
                     .with_click_message("Yes")
                     .on_click(move |_| {
@@ -49,10 +49,10 @@ pub(crate) fn download_permission(workspace: &mut Workspace, cx: &mut ViewContex
     .detach();
 
     cx.spawn(|_workspace, mut cx| async move {
-        while let Some((url, response_tx)) = request_rx.next().await {
+        while let Some(request) = request_rx.next().await {
             notification_queue
                 .update(&mut cx, |queue, cx| {
-                    queue.push_back((url, response_tx));
+                    queue.push_back(request);
                     cx.notify();
                 })
                 .unwrap();

@@ -313,7 +313,7 @@ impl ExtensionImports for WasmState {
             if !self
                 .host
                 .language_registry
-                .request_download_permission(&url)
+                .request_download_permission(&url, &self.manifest.name)
                 .await
             {
                 return Err(anyhow!("Download permission for '{url}' denied"));
