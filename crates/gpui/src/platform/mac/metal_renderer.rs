@@ -516,9 +516,7 @@ impl MetalRenderer {
         );
         self.custom_shaders_pipeline_states
             .push((pipeline, user_data_size, user_data_align));
-        self.custom_shader_ids
-            .insert(source.to_string(), id)
-            .unwrap();
+        self.custom_shader_ids.insert(source.to_string(), id);
         Ok(id)
     }
 
@@ -1203,7 +1201,6 @@ impl MetalRenderer {
             size_of::<CustomShaderGlobalParams>() as u64,
             &globals as *const CustomShaderGlobalParams as *const _,
         );
-        command_encoder.set_vertex_buffer(ShaderInputIndex::Globals as u64, None, 0);
         command_encoder.set_vertex_buffer(
             ShaderInputIndex::Instances as u64,
             Some(&instance_buffer.metal_buffer),
@@ -1260,9 +1257,9 @@ impl MetalRenderer {
         }
 
         command_encoder.draw_primitives_instanced(
-            metal::MTLPrimitiveType::Triangle,
+            metal::MTLPrimitiveType::TriangleStrip,
             0,
-            6,
+            4,
             shaders.len() as u64,
         );
         *instance_offset = next_offset;
