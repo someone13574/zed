@@ -3302,6 +3302,7 @@ impl Window {
                     .map_origin(|origin| origin.floor())
                     .map_size(|size| size.ceil()),
                 content_mask,
+                opacity: self.element_opacity,
             },
             data: SmallVec::from_slice(instance_data),
         });
