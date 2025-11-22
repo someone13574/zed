@@ -3275,8 +3275,8 @@ impl Window {
         &mut self,
         bounds: Bounds<Pixels>,
         shader: &str,
-        user_data: &T,
-    ) -> Result<(), &'static str> {
+        instance_data: &T,
+    ) -> anyhow::Result<()> {
         self.invalidator.debug_assert_paint();
 
         let scale_factor = self.scale_factor();
@@ -3293,8 +3293,8 @@ impl Window {
             T::ALIGN,
         )?;
 
-        let user_data_bytes = unsafe {
-            std::slice::from_raw_parts((user_data as *const T) as *const u8, size_of::<T>())
+        let instance_data = unsafe {
+            std::slice::from_raw_parts((instance_data as *const T) as *const u8, size_of::<T>())
         };
 
         self.next_frame.scene.insert_primitive(ShaderInstance {
@@ -3306,7 +3306,7 @@ impl Window {
                     .map_size(|size| size.ceil()),
                 content_mask,
             },
-            data: SmallVec::from_slice(user_data_bytes),
+            data: SmallVec::from_slice(instance_data),
         });
         Ok(())
     }
