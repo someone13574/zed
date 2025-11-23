@@ -28,20 +28,21 @@ struct FontKey {
 }
 
 impl FontKey {
+    #[allow(unused)]
     fn new(family: SharedString, features: FontFeatures) -> Self {
         Self { family, features }
     }
 }
 
 struct CosmicTextSystemState {
-    swash_cache: SwashCache,
+    _swash_cache: SwashCache,
     font_system: FontSystem,
     scratch: ShapeBuffer,
     /// Contains all already loaded fonts, including all faces. Indexed by `FontId`.
     loaded_fonts: Vec<LoadedFont>,
     /// Caches the `FontId`s associated with a specific family to avoid iterating the font database
     /// for every font face in a family.
-    font_ids_by_family_cache: HashMap<FontKey, SmallVec<[FontId; 4]>>,
+    _font_ids_by_family_cache: HashMap<FontKey, SmallVec<[FontId; 4]>>,
 }
 
 struct LoadedFont {
@@ -57,10 +58,10 @@ impl CosmicTextSystem {
 
         Self(RwLock::new(CosmicTextSystemState {
             font_system,
-            swash_cache: SwashCache::new(),
+            _swash_cache: SwashCache::new(),
             scratch: ShapeBuffer::default(),
             loaded_fonts: Vec::new(),
-            font_ids_by_family_cache: HashMap::default(),
+            _font_ids_by_family_cache: HashMap::default(),
         }))
     }
 }
@@ -71,6 +72,7 @@ impl Default for CosmicTextSystem {
     }
 }
 
+#[allow(unused)]
 impl PlatformTextSystem for CosmicTextSystem {
     fn add_fonts(&self, fonts: Vec<Cow<'static, [u8]>>) -> Result<()> {
         self.0.write().add_fonts(fonts)
@@ -94,12 +96,14 @@ impl PlatformTextSystem for CosmicTextSystem {
         // todo(linux): Do we need to use CosmicText's Font APIs? Can we consolidate this to use font_kit?
         let mut state = self.0.write();
         let key = FontKey::new(font.family.clone(), font.features.clone());
-        let candidates = if let Some(font_ids) = state.font_ids_by_family_cache.get(&key) {
+        let candidates = if let Some(font_ids) = state._font_ids_by_family_cache.get(&key) {
             font_ids.as_slice()
         } else {
             let font_ids = state.load_family(&font.family, &font.features)?;
-            state.font_ids_by_family_cache.insert(key.clone(), font_ids);
-            state.font_ids_by_family_cache[&key].as_ref()
+            state
+                ._font_ids_by_family_cache
+                .insert(key.clone(), font_ids);
+            state._font_ids_by_family_cache[&key].as_ref()
         };
 
         // todo(linux) ideally we would make fontdb's `find_best_match` pub instead of using font-kit here
@@ -279,7 +283,7 @@ impl CosmicTextSystemState {
             params.subpixel_variant.y as f32 / SUBPIXEL_VARIANTS_Y as f32 / params.scale_factor,
         );
         let image = self
-            .swash_cache
+            ._swash_cache
             .get_image(
                 &mut self.font_system,
                 CacheKey::new(
@@ -315,7 +319,7 @@ impl CosmicTextSystemState {
                 params.subpixel_variant.y as f32 / SUBPIXEL_VARIANTS_Y as f32 / params.scale_factor,
             );
             let mut image = self
-                .swash_cache
+                ._swash_cache
                 .get_image(
                     &mut self.font_system,
                     CacheKey::new(

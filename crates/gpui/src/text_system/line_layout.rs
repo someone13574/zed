@@ -1,15 +1,10 @@
-use crate::{FontId, GlyphId, Pixels, PlatformTextSystem, Point, SharedString, Size, point, px};
-use collections::FxHashMap;
-use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
+use crate::{FontId, GlyphId, Pixels, Point, SharedString, Size, point};
 use smallvec::SmallVec;
 use std::{
     borrow::Borrow,
     hash::{Hash, Hasher},
-    ops::Range,
     sync::Arc,
 };
-
-use super::LineWrapper;
 
 /// A laid out and styled line of text
 #[derive(Default, Debug)]
@@ -55,156 +50,160 @@ pub struct ShapedGlyph {
 
 impl LineLayout {
     /// The index for the character at the given x coordinate
-    pub fn index_for_x(&self, x: Pixels) -> Option<usize> {
-        if x >= self.width {
-            None
-        } else {
-            for run in self.runs.iter().rev() {
-                for glyph in run.glyphs.iter().rev() {
-                    if glyph.position.x <= x {
-                        return Some(glyph.index);
-                    }
-                }
-            }
-            Some(0)
-        }
+    pub fn index_for_x(&self, _x: Pixels) -> Option<usize> {
+        todo!()
+        // if x >= self.width {
+        //     None
+        // } else {
+        //     for run in self.runs.iter().rev() {
+        //         for glyph in run.glyphs.iter().rev() {
+        //             if glyph.position.x <= x {
+        //                 return Some(glyph.index);
+        //             }
+        //         }
+        //     }
+        //     Some(0)
+        // }
     }
 
     /// closest_index_for_x returns the character boundary closest to the given x coordinate
     /// (e.g. to handle aligning up/down arrow keys)
-    pub fn closest_index_for_x(&self, x: Pixels) -> usize {
-        let mut prev_index = 0;
-        let mut prev_x = px(0.);
+    pub fn closest_index_for_x(&self, _x: Pixels) -> usize {
+        todo!()
+        // let mut prev_index = 0;
+        // let mut prev_x = px(0.);
 
-        for run in self.runs.iter() {
-            for glyph in run.glyphs.iter() {
-                if glyph.position.x >= x {
-                    if glyph.position.x - x < x - prev_x {
-                        return glyph.index;
-                    } else {
-                        return prev_index;
-                    }
-                }
-                prev_index = glyph.index;
-                prev_x = glyph.position.x;
-            }
-        }
+        // for run in self.runs.iter() {
+        //     for glyph in run.glyphs.iter() {
+        //         if glyph.position.x >= x {
+        //             if glyph.position.x - x < x - prev_x {
+        //                 return glyph.index;
+        //             } else {
+        //                 return prev_index;
+        //             }
+        //         }
+        //         prev_index = glyph.index;
+        //         prev_x = glyph.position.x;
+        //     }
+        // }
 
-        if self.len == 1 {
-            if x > self.width / 2. {
-                return 1;
-            } else {
-                return 0;
-            }
-        }
+        // if self.len == 1 {
+        //     if x > self.width / 2. {
+        //         return 1;
+        //     } else {
+        //         return 0;
+        //     }
+        // }
 
-        self.len
+        // self.len
     }
 
     /// The x position of the character at the given index
-    pub fn x_for_index(&self, index: usize) -> Pixels {
-        for run in &self.runs {
-            for glyph in &run.glyphs {
-                if glyph.index >= index {
-                    return glyph.position.x;
-                }
-            }
-        }
-        self.width
+    pub fn x_for_index(&self, _index: usize) -> Pixels {
+        todo!()
+        // for run in &self.runs {
+        //     for glyph in &run.glyphs {
+        //         if glyph.index >= index {
+        //             return glyph.position.x;
+        //         }
+        //     }
+        // }
+        // self.width
     }
 
     /// The corresponding Font at the given index
-    pub fn font_id_for_index(&self, index: usize) -> Option<FontId> {
-        for run in &self.runs {
-            for glyph in &run.glyphs {
-                if glyph.index >= index {
-                    return Some(run.font_id);
-                }
-            }
-        }
-        None
+    pub fn font_id_for_index(&self, _index: usize) -> Option<FontId> {
+        todo!()
+        // for run in &self.runs {
+        //     for glyph in &run.glyphs {
+        //         if glyph.index >= index {
+        //             return Some(run.font_id);
+        //         }
+        //     }
+        // }
+        // None
     }
 
-    fn compute_wrap_boundaries(
-        &self,
-        text: &str,
-        wrap_width: Pixels,
-        max_lines: Option<usize>,
-    ) -> SmallVec<[WrapBoundary; 1]> {
-        let mut boundaries = SmallVec::new();
-        let mut first_non_whitespace_ix = None;
-        let mut last_candidate_ix = None;
-        let mut last_candidate_x = px(0.);
-        let mut last_boundary = WrapBoundary {
-            run_ix: 0,
-            glyph_ix: 0,
-        };
-        let mut last_boundary_x = px(0.);
-        let mut prev_ch = '\0';
-        let mut glyphs = self
-            .runs
-            .iter()
-            .enumerate()
-            .flat_map(move |(run_ix, run)| {
-                run.glyphs.iter().enumerate().map(move |(glyph_ix, glyph)| {
-                    let character = text[glyph.index..].chars().next().unwrap();
-                    (
-                        WrapBoundary { run_ix, glyph_ix },
-                        character,
-                        glyph.position.x,
-                    )
-                })
-            })
-            .peekable();
+    // fn compute_wrap_boundaries(
+    //     &self,
+    //     text: &str,
+    //     wrap_width: Pixels,
+    //     max_lines: Option<usize>,
+    // ) -> SmallVec<[WrapBoundary; 1]> {
+    //     let mut boundaries = SmallVec::new();
+    //     let mut first_non_whitespace_ix = None;
+    //     let mut last_candidate_ix = None;
+    //     let mut last_candidate_x = px(0.);
+    //     let mut last_boundary = WrapBoundary {
+    //         run_ix: 0,
+    //         glyph_ix: 0,
+    //     };
+    //     let mut last_boundary_x = px(0.);
+    //     let mut prev_ch = '\0';
+    //     let mut glyphs = self
+    //         .runs
+    //         .iter()
+    //         .enumerate()
+    //         .flat_map(move |(run_ix, run)| {
+    //             run.glyphs.iter().enumerate().map(move |(glyph_ix, glyph)| {
+    //                 let character = text[glyph.index..].chars().next().unwrap();
+    //                 (
+    //                     WrapBoundary { run_ix, glyph_ix },
+    //                     character,
+    //                     glyph.position.x,
+    //                 )
+    //             })
+    //         })
+    //         .peekable();
 
-        while let Some((boundary, ch, x)) = glyphs.next() {
-            if ch == '\n' {
-                continue;
-            }
+    //     while let Some((boundary, ch, x)) = glyphs.next() {
+    //         if ch == '\n' {
+    //             continue;
+    //         }
 
-            // Here is very similar to `LineWrapper::wrap_line` to determine text wrapping,
-            // but there are some differences, so we have to duplicate the code here.
-            if LineWrapper::is_word_char(ch) {
-                if prev_ch == ' ' && ch != ' ' && first_non_whitespace_ix.is_some() {
-                    last_candidate_ix = Some(boundary);
-                    last_candidate_x = x;
-                }
-            } else {
-                if ch != ' ' && first_non_whitespace_ix.is_some() {
-                    last_candidate_ix = Some(boundary);
-                    last_candidate_x = x;
-                }
-            }
+    //         // Here is very similar to `LineWrapper::wrap_line` to determine text wrapping,
+    //         // but there are some differences, so we have to duplicate the code here.
+    //         if LineWrapper::is_word_char(ch) {
+    //             if prev_ch == ' ' && ch != ' ' && first_non_whitespace_ix.is_some() {
+    //                 last_candidate_ix = Some(boundary);
+    //                 last_candidate_x = x;
+    //             }
+    //         } else {
+    //             if ch != ' ' && first_non_whitespace_ix.is_some() {
+    //                 last_candidate_ix = Some(boundary);
+    //                 last_candidate_x = x;
+    //             }
+    //         }
 
-            if ch != ' ' && first_non_whitespace_ix.is_none() {
-                first_non_whitespace_ix = Some(boundary);
-            }
+    //         if ch != ' ' && first_non_whitespace_ix.is_none() {
+    //             first_non_whitespace_ix = Some(boundary);
+    //         }
 
-            let next_x = glyphs.peek().map_or(self.width, |(_, _, x)| *x);
-            let width = next_x - last_boundary_x;
+    //         let next_x = glyphs.peek().map_or(self.width, |(_, _, x)| *x);
+    //         let width = next_x - last_boundary_x;
 
-            if width > wrap_width && boundary > last_boundary {
-                // When used line_clamp, we should limit the number of lines.
-                if let Some(max_lines) = max_lines
-                    && boundaries.len() >= max_lines - 1
-                {
-                    break;
-                }
+    //         if width > wrap_width && boundary > last_boundary {
+    //             // When used line_clamp, we should limit the number of lines.
+    //             if let Some(max_lines) = max_lines
+    //                 && boundaries.len() >= max_lines - 1
+    //             {
+    //                 break;
+    //             }
 
-                if let Some(last_candidate_ix) = last_candidate_ix.take() {
-                    last_boundary = last_candidate_ix;
-                    last_boundary_x = last_candidate_x;
-                } else {
-                    last_boundary = boundary;
-                    last_boundary_x = x;
-                }
-                boundaries.push(last_boundary);
-            }
-            prev_ch = ch;
-        }
+    //             if let Some(last_candidate_ix) = last_candidate_ix.take() {
+    //                 last_boundary = last_candidate_ix;
+    //                 last_boundary_x = last_candidate_x;
+    //             } else {
+    //                 last_boundary = boundary;
+    //                 last_boundary_x = x;
+    //             }
+    //             boundaries.push(last_boundary);
+    //         }
+    //         prev_ch = ch;
+    //     }
 
-        boundaries
-    }
+    //     boundaries
+    // }
 }
 
 /// A line of text that has been wrapped to fit a given width
@@ -389,208 +388,208 @@ impl WrappedLineLayout {
     }
 }
 
-pub(crate) struct LineLayoutCache {
-    previous_frame: Mutex<FrameCache>,
-    current_frame: RwLock<FrameCache>,
-    platform_text_system: Arc<dyn PlatformTextSystem>,
-}
+// pub(crate) struct LineLayoutCache {
+//     previous_frame: Mutex<FrameCache>,
+//     current_frame: RwLock<FrameCache>,
+//     platform_text_system: Arc<dyn PlatformTextSystem>,
+// }
 
-#[derive(Default)]
-struct FrameCache {
-    lines: FxHashMap<Arc<CacheKey>, Arc<LineLayout>>,
-    wrapped_lines: FxHashMap<Arc<CacheKey>, Arc<WrappedLineLayout>>,
-    used_lines: Vec<Arc<CacheKey>>,
-    used_wrapped_lines: Vec<Arc<CacheKey>>,
-}
+// #[derive(Default)]
+// struct FrameCache {
+//     lines: FxHashMap<Arc<CacheKey>, Arc<LineLayout>>,
+//     wrapped_lines: FxHashMap<Arc<CacheKey>, Arc<WrappedLineLayout>>,
+//     used_lines: Vec<Arc<CacheKey>>,
+//     used_wrapped_lines: Vec<Arc<CacheKey>>,
+// }
 
-#[derive(Clone, Default)]
-pub(crate) struct LineLayoutIndex {
-    lines_index: usize,
-    wrapped_lines_index: usize,
-}
+// #[derive(Clone, Default)]
+// pub(crate) struct LineLayoutIndex {
+//     lines_index: usize,
+//     wrapped_lines_index: usize,
+// }
 
-impl LineLayoutCache {
-    pub fn new(platform_text_system: Arc<dyn PlatformTextSystem>) -> Self {
-        Self {
-            previous_frame: Mutex::default(),
-            current_frame: RwLock::default(),
-            platform_text_system,
-        }
-    }
+// impl LineLayoutCache {
+//     pub fn new(platform_text_system: Arc<dyn PlatformTextSystem>) -> Self {
+//         Self {
+//             previous_frame: Mutex::default(),
+//             current_frame: RwLock::default(),
+//             platform_text_system,
+//         }
+//     }
 
-    pub fn layout_index(&self) -> LineLayoutIndex {
-        let frame = self.current_frame.read();
-        LineLayoutIndex {
-            lines_index: frame.used_lines.len(),
-            wrapped_lines_index: frame.used_wrapped_lines.len(),
-        }
-    }
+//     pub fn layout_index(&self) -> LineLayoutIndex {
+//         let frame = self.current_frame.read();
+//         LineLayoutIndex {
+//             lines_index: frame.used_lines.len(),
+//             wrapped_lines_index: frame.used_wrapped_lines.len(),
+//         }
+//     }
 
-    pub fn reuse_layouts(&self, range: Range<LineLayoutIndex>) {
-        let mut previous_frame = &mut *self.previous_frame.lock();
-        let mut current_frame = &mut *self.current_frame.write();
+//     pub fn reuse_layouts(&self, range: Range<LineLayoutIndex>) {
+//         let mut previous_frame = &mut *self.previous_frame.lock();
+//         let mut current_frame = &mut *self.current_frame.write();
 
-        for key in &previous_frame.used_lines[range.start.lines_index..range.end.lines_index] {
-            if let Some((key, line)) = previous_frame.lines.remove_entry(key) {
-                current_frame.lines.insert(key, line);
-            }
-            current_frame.used_lines.push(key.clone());
-        }
+//         for key in &previous_frame.used_lines[range.start.lines_index..range.end.lines_index] {
+//             if let Some((key, line)) = previous_frame.lines.remove_entry(key) {
+//                 current_frame.lines.insert(key, line);
+//             }
+//             current_frame.used_lines.push(key.clone());
+//         }
 
-        for key in &previous_frame.used_wrapped_lines
-            [range.start.wrapped_lines_index..range.end.wrapped_lines_index]
-        {
-            if let Some((key, line)) = previous_frame.wrapped_lines.remove_entry(key) {
-                current_frame.wrapped_lines.insert(key, line);
-            }
-            current_frame.used_wrapped_lines.push(key.clone());
-        }
-    }
+//         for key in &previous_frame.used_wrapped_lines
+//             [range.start.wrapped_lines_index..range.end.wrapped_lines_index]
+//         {
+//             if let Some((key, line)) = previous_frame.wrapped_lines.remove_entry(key) {
+//                 current_frame.wrapped_lines.insert(key, line);
+//             }
+//             current_frame.used_wrapped_lines.push(key.clone());
+//         }
+//     }
 
-    pub fn truncate_layouts(&self, index: LineLayoutIndex) {
-        let mut current_frame = &mut *self.current_frame.write();
-        current_frame.used_lines.truncate(index.lines_index);
-        current_frame
-            .used_wrapped_lines
-            .truncate(index.wrapped_lines_index);
-    }
+//     pub fn truncate_layouts(&self, index: LineLayoutIndex) {
+//         let mut current_frame = &mut *self.current_frame.write();
+//         current_frame.used_lines.truncate(index.lines_index);
+//         current_frame
+//             .used_wrapped_lines
+//             .truncate(index.wrapped_lines_index);
+//     }
 
-    pub fn finish_frame(&self) {
-        let mut prev_frame = self.previous_frame.lock();
-        let mut curr_frame = self.current_frame.write();
-        std::mem::swap(&mut *prev_frame, &mut *curr_frame);
-        curr_frame.lines.clear();
-        curr_frame.wrapped_lines.clear();
-        curr_frame.used_lines.clear();
-        curr_frame.used_wrapped_lines.clear();
-    }
+//     pub fn finish_frame(&self) {
+//         let mut prev_frame = self.previous_frame.lock();
+//         let mut curr_frame = self.current_frame.write();
+//         std::mem::swap(&mut *prev_frame, &mut *curr_frame);
+//         curr_frame.lines.clear();
+//         curr_frame.wrapped_lines.clear();
+//         curr_frame.used_lines.clear();
+//         curr_frame.used_wrapped_lines.clear();
+//     }
 
-    pub fn layout_wrapped_line<Text>(
-        &self,
-        text: Text,
-        font_size: Pixels,
-        runs: &[FontRun],
-        wrap_width: Option<Pixels>,
-        max_lines: Option<usize>,
-    ) -> Arc<WrappedLineLayout>
-    where
-        Text: AsRef<str>,
-        SharedString: From<Text>,
-    {
-        let key = &CacheKeyRef {
-            text: text.as_ref(),
-            font_size,
-            runs,
-            wrap_width,
-            force_width: None,
-        } as &dyn AsCacheKeyRef;
+//     pub fn layout_wrapped_line<Text>(
+//         &self,
+//         text: Text,
+//         font_size: Pixels,
+//         runs: &[FontRun],
+//         wrap_width: Option<Pixels>,
+//         max_lines: Option<usize>,
+//     ) -> Arc<WrappedLineLayout>
+//     where
+//         Text: AsRef<str>,
+//         SharedString: From<Text>,
+//     {
+//         let key = &CacheKeyRef {
+//             text: text.as_ref(),
+//             font_size,
+//             runs,
+//             wrap_width,
+//             force_width: None,
+//         } as &dyn AsCacheKeyRef;
 
-        let current_frame = self.current_frame.upgradable_read();
-        if let Some(layout) = current_frame.wrapped_lines.get(key) {
-            return layout.clone();
-        }
+//         let current_frame = self.current_frame.upgradable_read();
+//         if let Some(layout) = current_frame.wrapped_lines.get(key) {
+//             return layout.clone();
+//         }
 
-        let previous_frame_entry = self.previous_frame.lock().wrapped_lines.remove_entry(key);
-        if let Some((key, layout)) = previous_frame_entry {
-            let mut current_frame = RwLockUpgradableReadGuard::upgrade(current_frame);
-            current_frame
-                .wrapped_lines
-                .insert(key.clone(), layout.clone());
-            current_frame.used_wrapped_lines.push(key);
-            layout
-        } else {
-            drop(current_frame);
-            let text = SharedString::from(text);
-            let unwrapped_layout = self.layout_line::<&SharedString>(&text, font_size, runs, None);
-            let wrap_boundaries = if let Some(wrap_width) = wrap_width {
-                unwrapped_layout.compute_wrap_boundaries(text.as_ref(), wrap_width, max_lines)
-            } else {
-                SmallVec::new()
-            };
-            let layout = Arc::new(WrappedLineLayout {
-                unwrapped_layout,
-                wrap_boundaries,
-                wrap_width,
-            });
-            let key = Arc::new(CacheKey {
-                text,
-                font_size,
-                runs: SmallVec::from(runs),
-                wrap_width,
-                force_width: None,
-            });
+//         let previous_frame_entry = self.previous_frame.lock().wrapped_lines.remove_entry(key);
+//         if let Some((key, layout)) = previous_frame_entry {
+//             let mut current_frame = RwLockUpgradableReadGuard::upgrade(current_frame);
+//             current_frame
+//                 .wrapped_lines
+//                 .insert(key.clone(), layout.clone());
+//             current_frame.used_wrapped_lines.push(key);
+//             layout
+//         } else {
+//             drop(current_frame);
+//             let text = SharedString::from(text);
+//             let unwrapped_layout = self.layout_line::<&SharedString>(&text, font_size, runs, None);
+//             let wrap_boundaries = if let Some(wrap_width) = wrap_width {
+//                 unwrapped_layout.compute_wrap_boundaries(text.as_ref(), wrap_width, max_lines)
+//             } else {
+//                 SmallVec::new()
+//             };
+//             let layout = Arc::new(WrappedLineLayout {
+//                 unwrapped_layout,
+//                 wrap_boundaries,
+//                 wrap_width,
+//             });
+//             let key = Arc::new(CacheKey {
+//                 text,
+//                 font_size,
+//                 runs: SmallVec::from(runs),
+//                 wrap_width,
+//                 force_width: None,
+//             });
 
-            let mut current_frame = self.current_frame.write();
-            current_frame
-                .wrapped_lines
-                .insert(key.clone(), layout.clone());
-            current_frame.used_wrapped_lines.push(key);
+//             let mut current_frame = self.current_frame.write();
+//             current_frame
+//                 .wrapped_lines
+//                 .insert(key.clone(), layout.clone());
+//             current_frame.used_wrapped_lines.push(key);
 
-            layout
-        }
-    }
+//             layout
+//         }
+//     }
 
-    pub fn layout_line<Text>(
-        &self,
-        text: Text,
-        font_size: Pixels,
-        runs: &[FontRun],
-        force_width: Option<Pixels>,
-    ) -> Arc<LineLayout>
-    where
-        Text: AsRef<str>,
-        SharedString: From<Text>,
-    {
-        let key = &CacheKeyRef {
-            text: text.as_ref(),
-            font_size,
-            runs,
-            wrap_width: None,
-            force_width,
-        } as &dyn AsCacheKeyRef;
+//     pub fn layout_line<Text>(
+//         &self,
+//         text: Text,
+//         font_size: Pixels,
+//         runs: &[FontRun],
+//         force_width: Option<Pixels>,
+//     ) -> Arc<LineLayout>
+//     where
+//         Text: AsRef<str>,
+//         SharedString: From<Text>,
+//     {
+//         let key = &CacheKeyRef {
+//             text: text.as_ref(),
+//             font_size,
+//             runs,
+//             wrap_width: None,
+//             force_width,
+//         } as &dyn AsCacheKeyRef;
 
-        let current_frame = self.current_frame.upgradable_read();
-        if let Some(layout) = current_frame.lines.get(key) {
-            return layout.clone();
-        }
+//         let current_frame = self.current_frame.upgradable_read();
+//         if let Some(layout) = current_frame.lines.get(key) {
+//             return layout.clone();
+//         }
 
-        let mut current_frame = RwLockUpgradableReadGuard::upgrade(current_frame);
-        if let Some((key, layout)) = self.previous_frame.lock().lines.remove_entry(key) {
-            current_frame.lines.insert(key.clone(), layout.clone());
-            current_frame.used_lines.push(key);
-            layout
-        } else {
-            let text = SharedString::from(text);
-            let mut layout = self
-                .platform_text_system
-                .layout_line(&text, font_size, runs);
+//         let mut current_frame = RwLockUpgradableReadGuard::upgrade(current_frame);
+//         if let Some((key, layout)) = self.previous_frame.lock().lines.remove_entry(key) {
+//             current_frame.lines.insert(key.clone(), layout.clone());
+//             current_frame.used_lines.push(key);
+//             layout
+//         } else {
+//             let text = SharedString::from(text);
+//             let mut layout = self
+//                 .platform_text_system
+//                 .layout_line(&text, font_size, runs);
 
-            if let Some(force_width) = force_width {
-                let mut glyph_pos = 0;
-                for run in layout.runs.iter_mut() {
-                    for glyph in run.glyphs.iter_mut() {
-                        if (glyph.position.x - glyph_pos * force_width).abs() > px(1.) {
-                            glyph.position.x = glyph_pos * force_width;
-                        }
-                        glyph_pos += 1;
-                    }
-                }
-            }
+//             if let Some(force_width) = force_width {
+//                 let mut glyph_pos = 0;
+//                 for run in layout.runs.iter_mut() {
+//                     for glyph in run.glyphs.iter_mut() {
+//                         if (glyph.position.x - glyph_pos * force_width).abs() > px(1.) {
+//                             glyph.position.x = glyph_pos * force_width;
+//                         }
+//                         glyph_pos += 1;
+//                     }
+//                 }
+//             }
 
-            let key = Arc::new(CacheKey {
-                text,
-                font_size,
-                runs: SmallVec::from(runs),
-                wrap_width: None,
-                force_width,
-            });
-            let layout = Arc::new(layout);
-            current_frame.lines.insert(key.clone(), layout.clone());
-            current_frame.used_lines.push(key);
-            layout
-        }
-    }
-}
+//             let key = Arc::new(CacheKey {
+//                 text,
+//                 font_size,
+//                 runs: SmallVec::from(runs),
+//                 wrap_width: None,
+//                 force_width,
+//             });
+//             let layout = Arc::new(layout);
+//             current_frame.lines.insert(key.clone(), layout.clone());
+//             current_frame.used_lines.push(key);
+//             layout
+//         }
+//     }
+// }
 
 /// A run of text with a single font.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
