@@ -2123,10 +2123,17 @@ impl Window {
         #[cfg(any(feature = "inspector", debug_assertions))]
         let inspector_element = self.prepaint_inspector(_inspector_width, cx);
 
-        let mut sorted_deferred_draws =
-            (0..self.next_frame.deferred_draws.len()).collect::<SmallVec<[_; 8]>>();
-        sorted_deferred_draws.sort_by_key(|ix| self.next_frame.deferred_draws[*ix].priority);
-        self.prepaint_deferred_draws(&sorted_deferred_draws, cx);
+        let mut range_start = 0;
+        let mut sorted_deferred_draws = SmallVec::<[usize; 8]>::new();
+        while range_start != self.next_frame.deferred_draws.len() {
+            let mut sorted_indices =
+                (range_start..self.next_frame.deferred_draws.len()).collect::<SmallVec<[_; 8]>>();
+            sorted_indices.sort_by_key(|ix| self.next_frame.deferred_draws[*ix].priority);
+
+            range_start += sorted_indices.len();
+            self.prepaint_deferred_draws(&sorted_indices, cx);
+            sorted_deferred_draws.append(&mut sorted_indices);
+        }
 
         let mut prompt_element = None;
         let mut active_drag_element = None;
@@ -2265,12 +2272,9 @@ impl Window {
             let prepaint_end = self.prepaint_index();
             deferred_draw.prepaint_range = prepaint_start..prepaint_end;
         }
-        assert_eq!(
-            self.next_frame.deferred_draws.len(),
-            0,
-            "cannot call defer_draw during deferred drawing"
-        );
+        deferred_draws.append(&mut self.next_frame.deferred_draws);
         self.next_frame.deferred_draws = deferred_draws;
+
         self.element_id_stack.clear();
         self.text_style_stack.clear();
     }
