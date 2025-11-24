@@ -48,6 +48,8 @@ use async_task::Runnable;
 use futures::channel::oneshot;
 use image::codecs::gif::GifDecoder;
 use image::{AnimationDecoder as _, Frame};
+use parley::FontData;
+use parley::fontique::Blob;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use schemars::JsonSchema;
 use seahash::SeaHasher;
@@ -597,20 +599,20 @@ pub trait PlatformDispatcher: Send + Sync {
 
 #[allow(unused)]
 pub(crate) trait PlatformTextSystem: Send + Sync {
-    fn add_fonts(&self, fonts: Vec<Cow<'static, [u8]>>) -> Result<()>;
-    fn all_font_names(&self) -> Vec<String>;
-    fn font_id(&self, descriptor: &Font) -> Result<FontId>;
-    fn font_metrics(&self, font_id: FontId) -> FontMetrics;
-    fn typographic_bounds(&self, font_id: FontId, glyph_id: GlyphId) -> Result<Bounds<f32>>;
-    fn advance(&self, font_id: FontId, glyph_id: GlyphId) -> Result<Size<f32>>;
-    fn glyph_for_char(&self, font_id: FontId, ch: char) -> Option<GlyphId>;
+    fn add_font(&self, font: FontData) -> Result<()>;
+    // fn all_font_names(&self) -> Vec<String>;
+    // fn font_id(&self, descriptor: &Font) -> Result<FontId>;
+    // fn font_metrics(&self, font_id: FontId) -> FontMetrics;
+    // fn typographic_bounds(&self, font_id: FontId, glyph_id: GlyphId) -> Result<Bounds<f32>>;
+    // fn advance(&self, font_id: FontId, glyph_id: GlyphId) -> Result<Size<f32>>;
+    // fn glyph_for_char(&self, font_id: FontId, ch: char) -> Option<GlyphId>;
     fn glyph_raster_bounds(&self, params: &RenderGlyphParams) -> Result<Bounds<DevicePixels>>;
     fn rasterize_glyph(
         &self,
         params: &RenderGlyphParams,
         raster_bounds: Bounds<DevicePixels>,
     ) -> Result<(Size<DevicePixels>, Vec<u8>)>;
-    fn layout_line(&self, text: &str, font_size: Pixels, runs: &[FontRun]) -> LineLayout;
+    // fn layout_line(&self, text: &str, font_size: Pixels, runs: &[FontRun]) -> LineLayout;
 }
 
 pub(crate) struct NoopTextSystem;
@@ -623,55 +625,59 @@ impl NoopTextSystem {
 }
 
 impl PlatformTextSystem for NoopTextSystem {
-    fn add_fonts(&self, _fonts: Vec<Cow<'static, [u8]>>) -> Result<()> {
+    fn add_font(&self, _font: FontData) -> Result<()> {
         Ok(())
     }
 
-    fn all_font_names(&self) -> Vec<String> {
-        Vec::new()
-    }
+    // fn add_fonts(&self, _fonts: Vec<Cow<'static, [u8]>>) -> Result<()> {
+    //     Ok(())
+    // }
 
-    fn font_id(&self, _descriptor: &Font) -> Result<FontId> {
-        Ok(FontId(1))
-    }
+    // fn all_font_names(&self) -> Vec<String> {
+    //     Vec::new()
+    // }
 
-    fn font_metrics(&self, _font_id: FontId) -> FontMetrics {
-        FontMetrics {
-            units_per_em: 1000,
-            ascent: 1025.0,
-            descent: -275.0,
-            line_gap: 0.0,
-            underline_position: -95.0,
-            underline_thickness: 60.0,
-            cap_height: 698.0,
-            x_height: 516.0,
-            bounding_box: Bounds {
-                origin: Point {
-                    x: -260.0,
-                    y: -245.0,
-                },
-                size: Size {
-                    width: 1501.0,
-                    height: 1364.0,
-                },
-            },
-        }
-    }
+    // fn font_id(&self, _descriptor: &Font) -> Result<FontId> {
+    //     Ok(FontId(1))
+    // }
 
-    fn typographic_bounds(&self, _font_id: FontId, _glyph_id: GlyphId) -> Result<Bounds<f32>> {
-        Ok(Bounds {
-            origin: Point { x: 54.0, y: 0.0 },
-            size: size(392.0, 528.0),
-        })
-    }
+    // fn font_metrics(&self, _font_id: FontId) -> FontMetrics {
+    //     FontMetrics {
+    //         units_per_em: 1000,
+    //         ascent: 1025.0,
+    //         descent: -275.0,
+    //         line_gap: 0.0,
+    //         underline_position: -95.0,
+    //         underline_thickness: 60.0,
+    //         cap_height: 698.0,
+    //         x_height: 516.0,
+    //         bounding_box: Bounds {
+    //             origin: Point {
+    //                 x: -260.0,
+    //                 y: -245.0,
+    //             },
+    //             size: Size {
+    //                 width: 1501.0,
+    //                 height: 1364.0,
+    //             },
+    //         },
+    //     }
+    // }
 
-    fn advance(&self, _font_id: FontId, glyph_id: GlyphId) -> Result<Size<f32>> {
-        Ok(size(600.0 * glyph_id.0 as f32, 0.0))
-    }
+    // fn typographic_bounds(&self, _font_id: FontId, _glyph_id: GlyphId) -> Result<Bounds<f32>> {
+    //     Ok(Bounds {
+    //         origin: Point { x: 54.0, y: 0.0 },
+    //         size: size(392.0, 528.0),
+    //     })
+    // }
 
-    fn glyph_for_char(&self, _font_id: FontId, ch: char) -> Option<GlyphId> {
-        Some(GlyphId(ch.len_utf16() as u32))
-    }
+    // fn advance(&self, _font_id: FontId, glyph_id: GlyphId) -> Result<Size<f32>> {
+    //     Ok(size(600.0 * glyph_id.0 as f32, 0.0))
+    // }
+
+    // fn glyph_for_char(&self, _font_id: FontId, ch: char) -> Option<GlyphId> {
+    //     Some(GlyphId(ch.len_utf16() as u32))
+    // }
 
     fn glyph_raster_bounds(&self, _params: &RenderGlyphParams) -> Result<Bounds<DevicePixels>> {
         Ok(Default::default())
@@ -685,52 +691,52 @@ impl PlatformTextSystem for NoopTextSystem {
         Ok((raster_bounds.size, Vec::new()))
     }
 
-    fn layout_line(&self, text: &str, font_size: Pixels, _runs: &[FontRun]) -> LineLayout {
-        let mut position = px(0.);
-        let metrics = self.font_metrics(FontId(0));
-        let em_width = font_size
-            * self
-                .advance(FontId(0), self.glyph_for_char(FontId(0), 'm').unwrap())
-                .unwrap()
-                .width
-            / metrics.units_per_em as f32;
-        let mut glyphs = Vec::new();
-        for (ix, c) in text.char_indices() {
-            if let Some(glyph) = self.glyph_for_char(FontId(0), c) {
-                glyphs.push(ShapedGlyph {
-                    id: glyph,
-                    position: point(position, px(0.)),
-                    index: ix,
-                    is_emoji: glyph.0 == 2,
-                });
-                if glyph.0 == 2 {
-                    position += em_width * 2.0;
-                } else {
-                    position += em_width;
-                }
-            } else {
-                position += em_width
-            }
-        }
-        let mut runs = Vec::default();
-        if !glyphs.is_empty() {
-            runs.push(ShapedRun {
-                font_id: FontId(0),
-                glyphs,
-            });
-        } else {
-            position = px(0.);
-        }
+    // fn layout_line(&self, text: &str, font_size: Pixels, _runs: &[FontRun]) -> LineLayout {
+    //     let mut position = px(0.);
+    //     let metrics = self.font_metrics(FontId(0));
+    //     let em_width = font_size
+    //         * self
+    //             .advance(FontId(0), self.glyph_for_char(FontId(0), 'm').unwrap())
+    //             .unwrap()
+    //             .width
+    //         / metrics.units_per_em as f32;
+    //     let mut glyphs = Vec::new();
+    //     for (ix, c) in text.char_indices() {
+    //         if let Some(glyph) = self.glyph_for_char(FontId(0), c) {
+    //             glyphs.push(ShapedGlyph {
+    //                 id: glyph,
+    //                 position: point(position, px(0.)),
+    //                 index: ix,
+    //                 is_emoji: glyph.0 == 2,
+    //             });
+    //             if glyph.0 == 2 {
+    //                 position += em_width * 2.0;
+    //             } else {
+    //                 position += em_width;
+    //             }
+    //         } else {
+    //             position += em_width
+    //         }
+    //     }
+    //     let mut runs = Vec::default();
+    //     if !glyphs.is_empty() {
+    //         runs.push(ShapedRun {
+    //             font_id: FontId(0),
+    //             glyphs,
+    //         });
+    //     } else {
+    //         position = px(0.);
+    //     }
 
-        LineLayout {
-            font_size,
-            width: position,
-            ascent: font_size * (metrics.ascent / metrics.units_per_em as f32),
-            descent: font_size * (metrics.descent / metrics.units_per_em as f32),
-            runs,
-            len: text.len(),
-        }
-    }
+    //     LineLayout {
+    //         font_size,
+    //         width: position,
+    //         ascent: font_size * (metrics.ascent / metrics.units_per_em as f32),
+    //         descent: font_size * (metrics.descent / metrics.units_per_em as f32),
+    //         runs,
+    //         len: text.len(),
+    //     }
+    // }
 }
 
 // Adapted from https://github.com/microsoft/terminal/blob/1283c0f5b99a2961673249fa77c6b986efb5086c/src/renderer/atlas/dwrite.cpp

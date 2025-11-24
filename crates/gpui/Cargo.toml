@@ -45,7 +45,7 @@ wayland = [
     "blade-util",
     "bytemuck",
     "ashpd/wayland",
-    "cosmic-text",
+    "swash",
     "font-kit",
     "calloop-wayland-source",
     "wayland-backend",
@@ -64,7 +64,7 @@ x11 = [
     "blade-util",
     "bytemuck",
     "ashpd",
-    "cosmic-text",
+    "swash",
     "font-kit",
     "as-raw-xcb-connection",
     "x11rb",
@@ -182,7 +182,6 @@ blade-graphics = { workspace = true, optional = true }
 blade-macros = { workspace = true, optional = true }
 blade-util = { workspace = true, optional = true }
 bytemuck = { version = "1", optional = true }
-cosmic-text = { version = "0.14.0", optional = true }
 # WARNING: If you change this, you must also publish a new version of zed-font-kit to crates.io
 font-kit = { git = "https://github.com/zed-industries/font-kit", rev = "110523127440aefb11ce0cf280ae7c5071337ec5", package = "zed-font-kit", version = "0.14.1-zed", features = [
     "source-fontconfig-dlopen",
@@ -194,6 +193,7 @@ open = { version = "5.2.0", optional = true }
 
 # Wayland
 calloop-wayland-source = { version = "0.4.1", optional = true }
+swash = { version = "0.2.6", optional = true }
 wayland-backend = { version = "0.3.3", features = [
     "client_system",
     "dlopen",

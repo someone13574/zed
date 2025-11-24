@@ -1,12 +1,11 @@
 use crate::{
-    ActiveTooltip, AnyView, App, Bounds, DispatchPhase, Element, ElementId, GlobalElementId,
-    HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, Size, TextOverflow,
-    TextRun, TextStyle, TooltipId, WhiteSpace, Window, WrappedLine, WrappedLineLayout,
-    register_tooltip_mouse_handlers, set_tooltip_on_window,
+    ActiveTooltip, AnyView, App, Bounds, DispatchPhase, Element, ElementId, FontId,
+    GlobalElementId, GlyphId, HighlightStyle, Hitbox, HitboxBehavior, Hsla, InspectorElementId,
+    IntoElement, LayoutId, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
+    SharedString, Size, TextOverflow, TextRun, TextStyle, TooltipId, WhiteSpace, Window,
+    WrappedLineLayout, point, px, register_tooltip_mouse_handlers, set_tooltip_on_window, size,
 };
 use anyhow::Context as _;
-use smallvec::SmallVec;
 use std::{
     borrow::Cow,
     cell::{Cell, RefCell},
@@ -314,7 +313,7 @@ pub struct TextLayout(Rc<RefCell<Option<TextLayoutInner>>>);
 
 struct TextLayoutInner {
     len: usize,
-    lines: SmallVec<[WrappedLine; 1]>,
+    layout: parley::Layout<Hsla>,
     line_height: Pixels,
     wrap_width: Option<Pixels>,
     size: Option<Size<Pixels>>,
@@ -377,50 +376,50 @@ impl TextLayout {
                     return text_layout.size.unwrap();
                 }
 
-                let mut line_wrapper = cx.text_system().line_wrapper(text_style.font(), font_size);
-                let (text, runs) = if let Some(truncate_width) = truncate_width {
-                    line_wrapper.truncate_line(
-                        text.clone(),
-                        truncate_width,
-                        &truncation_suffix,
-                        &runs,
-                    )
+                // let mut line_wrapper = cx.text_system().line_wrapper(text_style.font(), font_size);
+                let (text, runs) = if let Some(_truncate_width) = truncate_width {
+                    (text.clone(), Cow::Borrowed(&*runs))
+                    // line_wrapper.truncate_line(
+                    //     text.clone(),
+                    //     truncate_width,
+                    //     &truncation_suffix,
+                    //     &runs,
+                    // )
                 } else {
                     (text.clone(), Cow::Borrowed(&*runs))
                 };
                 let len = text.len();
 
-                let Some(lines) = window
-                    .text_system()
-                    .shape_text(
-                        text,
-                        font_size,
-                        &runs,
-                        wrap_width,            // Wrap if we know the width.
-                        text_style.line_clamp, // Limit the number of lines if line_clamp is set.
-                    )
-                    .log_err()
-                else {
-                    element_state.0.borrow_mut().replace(TextLayoutInner {
-                        lines: Default::default(),
-                        len: 0,
-                        line_height,
-                        wrap_width,
-                        size: Some(Size::default()),
-                        bounds: None,
-                    });
-                    return Size::default();
-                };
+                let layout = window.text_system().shape_text(
+                    text,
+                    font_size,
+                    &runs,
+                    wrap_width,
+                    text_style.line_clamp,
+                );
 
-                let mut size: Size<Pixels> = Size::default();
-                for line in &lines {
-                    let line_size = line.size(line_height);
-                    size.height += line_size.height;
-                    size.width = size.width.max(line_size.width).ceil();
-                }
+                // let Some(lines) = window.text_system().shape_text(
+                //     text,
+                //     font_size,
+                //     &runs,
+                //     wrap_width,            // Wrap if we know the width.
+                //     text_style.line_clamp, // Limit the number of lines if line_clamp is set.
+                // ) else {
+                //     element_state.0.borrow_mut().replace(TextLayoutInner {
+                //         lines: Default::default(),
+                //         len: 0,
+                //         line_height,
+                //         wrap_width,
+                //         size: Some(Size::default()),
+                //         bounds: None,
+                //     });
+                //     return Size::default();
+                // };
+
+                let mut size: Size<Pixels> = size(layout.width().into(), layout.height().into());
 
                 element_state.0.borrow_mut().replace(TextLayoutInner {
-                    lines,
+                    layout,
                     len,
                     line_height,
                     wrap_width,
@@ -456,122 +455,160 @@ impl TextLayout {
         let line_height = element_state.line_height;
         let mut line_origin = bounds.origin;
         let text_style = window.text_style();
-        for line in &element_state.lines {
-            line.paint_background(
-                line_origin,
-                line_height,
-                text_style.text_align,
-                Some(bounds),
-                window,
-                cx,
-            )
-            .log_err();
-            line.paint(
-                line_origin,
-                line_height,
-                text_style.text_align,
-                Some(bounds),
-                window,
-                cx,
-            )
-            .log_err();
-            line_origin.y += line.size(line_height).height;
+
+        for line in element_state.layout.lines() {
+            for item in line.items() {
+                match item {
+                    parley::PositionedLayoutItem::GlyphRun(glyph_run) => {
+                        let mut run_x = glyph_run.offset() + bounds.origin.x.0;
+                        let run_y = glyph_run.baseline() + bounds.origin.y.0;
+                        let font = glyph_run.run().font();
+                        let font_size = glyph_run.run().font_size();
+
+                        for glyph in glyph_run.glyphs() {
+                            window.text_system().add_font(font.clone()).unwrap();
+                            window
+                                .paint_glyph(
+                                    point(px(run_x), px(run_y)),
+                                    FontId(font.data.id(), font.index),
+                                    GlyphId(glyph.id),
+                                    px(font_size),
+                                    glyph_run.style().brush,
+                                )
+                                .unwrap();
+                            run_x += glyph.advance;
+                        }
+                    }
+                    parley::PositionedLayoutItem::InlineBox(positioned_inline_box) => todo!(),
+                }
+            }
         }
+        // for line in &element_state.lines {
+        //     line.paint_background(
+        //         line_origin,
+        //         line_height,
+        //         text_style.text_align,
+        //         Some(bounds),
+        //         window,
+        //         cx,
+        //     )
+        //     .log_err();
+        //     line.paint(
+        //         line_origin,
+        //         line_height,
+        //         text_style.text_align,
+        //         Some(bounds),
+        //         window,
+        //         cx,
+        //     )
+        //     .log_err();
+        //     todo!()
+        //     // line_origin.y += line.size(line_height).height;
+        // }
     }
 
     /// Get the byte index into the input of the pixel position.
     pub fn index_for_position(&self, mut position: Point<Pixels>) -> Result<usize, usize> {
-        let element_state = self.0.borrow();
-        let element_state = element_state
-            .as_ref()
-            .expect("measurement has not been performed");
-        let bounds = element_state
-            .bounds
-            .expect("prepaint has not been performed");
+        todo!()
 
-        if position.y < bounds.top() {
-            return Err(0);
-        }
+        // let element_state = self.0.borrow();
+        // let element_state = element_state
+        //     .as_ref()
+        //     .expect("measurement has not been performed");
+        // let bounds = element_state
+        //     .bounds
+        //     .expect("prepaint has not been performed");
 
-        let line_height = element_state.line_height;
-        let mut line_origin = bounds.origin;
-        let mut line_start_ix = 0;
-        for line in &element_state.lines {
-            let line_bottom = line_origin.y + line.size(line_height).height;
-            if position.y > line_bottom {
-                line_origin.y = line_bottom;
-                line_start_ix += line.len() + 1;
-            } else {
-                let position_within_line = position - line_origin;
-                match line.index_for_position(position_within_line, line_height) {
-                    Ok(index_within_line) => return Ok(line_start_ix + index_within_line),
-                    Err(index_within_line) => return Err(line_start_ix + index_within_line),
-                }
-            }
-        }
+        // if position.y < bounds.top() {
+        //     return Err(0);
+        // }
 
-        Err(line_start_ix.saturating_sub(1))
+        // let line_height = element_state.line_height;
+        // let mut line_origin = bounds.origin;
+        // let mut line_start_ix = 0;
+        // for line in &element_state.lines {
+        //     let line_bottom = line_origin.y + line.size().height;
+        //     if position.y > line_bottom {
+        //         line_origin.y = line_bottom;
+        //         line_start_ix += line.len() + 1;
+        //     } else {
+        //         todo!()
+        //         // let position_within_line = position - line_origin;
+        //         // match line.index_for_position(position_within_line, line_height) {
+        //         //     Ok(index_within_line) => return Ok(line_start_ix + index_within_line),
+        //         //     Err(index_within_line) => return Err(line_start_ix + index_within_line),
+        //         // }
+        //     }
+        // }
+
+        // Err(line_start_ix.saturating_sub(1))
     }
 
     /// Get the pixel position for the given byte index.
     pub fn position_for_index(&self, index: usize) -> Option<Point<Pixels>> {
-        let element_state = self.0.borrow();
-        let element_state = element_state
-            .as_ref()
-            .expect("measurement has not been performed");
-        let bounds = element_state
-            .bounds
-            .expect("prepaint has not been performed");
-        let line_height = element_state.line_height;
+        todo!()
 
-        let mut line_origin = bounds.origin;
-        let mut line_start_ix = 0;
+        // let element_state = self.0.borrow();
+        // let element_state = element_state
+        //     .as_ref()
+        //     .expect("measurement has not been performed");
+        // let bounds = element_state
+        //     .bounds
+        //     .expect("prepaint has not been performed");
+        // let line_height = element_state.line_height;
 
-        for line in &element_state.lines {
-            let line_end_ix = line_start_ix + line.len();
-            if index < line_start_ix {
-                break;
-            } else if index > line_end_ix {
-                line_origin.y += line.size(line_height).height;
-                line_start_ix = line_end_ix + 1;
-                continue;
-            } else {
-                let ix_within_line = index - line_start_ix;
-                return Some(line_origin + line.position_for_index(ix_within_line, line_height)?);
-            }
-        }
+        // let mut line_origin = bounds.origin;
+        // let mut line_start_ix = 0;
 
-        None
+        // for line in &element_state.lines {
+        //     let line_end_ix = line_start_ix + line.len();
+        //     if index < line_start_ix {
+        //         break;
+        //     } else if index > line_end_ix {
+        //         line_origin.y += line.size().height;
+        //         line_start_ix = line_end_ix + 1;
+        //         continue;
+        //     } else {
+        //         let ix_within_line = index - line_start_ix;
+        //         todo!();
+        //         // return Some(line_origin + line.position_for_index(ix_within_line, line_height)?);
+        //     }
+        // }
+
+        // None
     }
 
     /// Retrieve the layout for the line containing the given byte index.
     pub fn line_layout_for_index(&self, index: usize) -> Option<Arc<WrappedLineLayout>> {
-        let element_state = self.0.borrow();
-        let element_state = element_state
-            .as_ref()
-            .expect("measurement has not been performed");
-        let bounds = element_state
-            .bounds
-            .expect("prepaint has not been performed");
-        let line_height = element_state.line_height;
+        todo!()
+        // let element_state = self.0.borrow();
+        // let element_state = element_state
+        //     .as_ref()
+        //     .expect("measurement has not been performed");
+        // let bounds = element_state
+        //     .bounds
+        //     .expect("prepaint has not been performed");
+        // let line_height = element_state.line_height;
 
-        let mut line_origin = bounds.origin;
-        let mut line_start_ix = 0;
+        // let mut line_origin = bounds.origin;
+        // let mut line_start_ix = 0;
 
-        for line in &element_state.lines {
-            let line_end_ix = line_start_ix + line.len();
-            if index < line_start_ix {
-                break;
-            } else if index > line_end_ix {
-                line_origin.y += line.size(line_height).height;
-                line_start_ix = line_end_ix + 1;
-                continue;
-            } else {
-                return Some(line.layout.clone());
-            }
-        }
+        // for line in &element_state.lines {
+        //     let line_end_ix = line_start_ix + line.len();
+        //     if index < line_start_ix {
+        //         break;
+        //     } else if index > line_end_ix {
+        //         todo!();
+        //         // line_origin.y += line.line().metrics().line_height;
+        //         line_start_ix = line_end_ix + 1;
+        //         continue;
+        //     } else {
+        //         todo!();
+        //         // return Some(line.layout.clone());
+        //     }
+        // }
 
-        None
+        // None
     }
 
     /// The bounds of this layout.
@@ -591,34 +628,37 @@ impl TextLayout {
 
     /// The text for this layout.
     pub fn text(&self) -> String {
-        self.0
-            .borrow()
-            .as_ref()
-            .unwrap()
-            .lines
-            .iter()
-            .map(|s| s.text.to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
+        todo!()
+
+        // self.0
+        //     .borrow()
+        //     .as_ref()
+        //     .unwrap()
+        //     .lines
+        //     .iter()
+        //     .map(|s| s.text.to_string())
+        //     .collect::<Vec<_>>()
+        //     .join("\n")
     }
 
     /// The text for this layout (with soft-wraps as newlines)
     pub fn wrapped_text(&self) -> String {
-        let mut lines = Vec::new();
-        for wrapped in self.0.borrow().as_ref().unwrap().lines.iter() {
-            let mut seen = 0;
-            for boundary in wrapped.layout.wrap_boundaries.iter() {
-                let index = wrapped.layout.unwrapped_layout.runs[boundary.run_ix].glyphs
-                    [boundary.glyph_ix]
-                    .index;
+        todo!();
+        // let mut lines = Vec::new();
+        // for wrapped in self.0.borrow().as_ref().unwrap().lines.iter() {
+        //     let mut seen = 0;
+        //     for boundary in wrapped.layout.wrap_boundaries.iter() {
+        //         let index = wrapped.layout.unwrapped_layout.runs[boundary.run_ix].glyphs
+        //             [boundary.glyph_ix]
+        //             .index;
 
-                lines.push(wrapped.text[seen..index].to_string());
-                seen = index;
-            }
-            lines.push(wrapped.text[seen..].to_string());
-        }
+        //         lines.push(wrapped.text[seen..index].to_string());
+        //         seen = index;
+        //     }
+        //     lines.push(wrapped.text[seen..].to_string());
+        // }
 
-        lines.join("\n")
+        // lines.join("\n")
     }
 }
 

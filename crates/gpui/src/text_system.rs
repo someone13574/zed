@@ -4,12 +4,15 @@ mod line;
 mod line_layout;
 mod line_wrapper;
 
+use collections::FxHashMap;
 pub use font_fallbacks::*;
 pub use font_features::*;
+use image::imageops::FilterType::Lanczos3;
 pub use line::*;
 pub use line_layout::*;
 pub use line_wrapper::*;
-use parley::{FontContext, LayoutContext};
+use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
+use parley::{FontContext, FontData, Layout, LayoutContext, PositionedLayoutItem, StyleProperty};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -36,7 +39,7 @@ use std::{
 /// An opaque identifier for a specific font.
 #[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
 #[repr(C)]
-pub struct FontId(pub usize);
+pub struct FontId(pub u64, pub u32);
 
 /// An opaque identifier for a specific font family.
 #[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
@@ -53,12 +56,12 @@ pub(crate) const SUBPIXEL_VARIANTS_Y: u8 =
 
 /// The GPUI text rendering sub system.
 pub struct TextSystem {
-    _platform_text_system: Arc<dyn PlatformTextSystem>,
-    _font_cx: FontContext,
-    _layout_cx: LayoutContext,
+    platform_text_system: Arc<dyn PlatformTextSystem>,
+    font_ctx: Mutex<FontContext>,
+    layout_ctx: Mutex<LayoutContext<Hsla>>,
     // font_ids_by_font: RwLock<FxHashMap<Font, Result<FontId>>>,
     // font_metrics: RwLock<FxHashMap<FontId, FontMetrics>>,
-    // raster_bounds: RwLock<FxHashMap<RenderGlyphParams, Bounds<DevicePixels>>>,
+    raster_bounds: RwLock<FxHashMap<RenderGlyphParams, Bounds<DevicePixels>>>,
     // wrapper_pool: Mutex<FxHashMap<FontIdWithSize, Vec<LineWrapper>>>,
     // font_runs_pool: Mutex<Vec<Vec<FontRun>>>,
     // fallback_font_stack: SmallVec<[Font; 2]>,
@@ -67,11 +70,11 @@ pub struct TextSystem {
 impl TextSystem {
     pub(crate) fn new(platform_text_system: Arc<dyn PlatformTextSystem>) -> Self {
         TextSystem {
-            _platform_text_system: platform_text_system,
-            _font_cx: FontContext::new(),
-            _layout_cx: LayoutContext::new(),
+            platform_text_system: platform_text_system,
+            font_ctx: Mutex::default(),
+            layout_ctx: Mutex::default(),
             // font_metrics: RwLock::default(),
-            // raster_bounds: RwLock::default(),
+            raster_bounds: RwLock::default(),
             // font_ids_by_font: RwLock::default(),
             // wrapper_pool: Mutex::default(),
             // font_runs_pool: Mutex::default(),
@@ -107,9 +110,8 @@ impl TextSystem {
     }
 
     /// Add a font's data to the text system.
-    pub fn add_fonts(&self, _fonts: Vec<Cow<'static, [u8]>>) -> Result<()> {
-        todo!()
-        // self.platform_text_system.add_fonts(fonts)
+    pub(crate) fn add_font(&self, font: FontData) -> Result<()> {
+        self.platform_text_system.add_font(font)
     }
 
     // /// Get the FontId for the configure font family and style.
@@ -310,8 +312,9 @@ impl TextSystem {
     // }
 
     /// Returns a handle to a line wrapper, for the given font and font size.
+    #[deprecated]
     pub fn line_wrapper(self: &Arc<Self>, _font: Font, _font_size: Pixels) -> LineWrapperHandle {
-        todo!("remove")
+        todo!()
         // let lock = &mut self.wrapper_pool.lock();
         // let font_id = self.resolve_font(&font);
         // let wrappers = lock
@@ -328,30 +331,25 @@ impl TextSystem {
     }
 
     /// Get the rasterized size and location of a specific, rendered glyph.
-    pub(crate) fn raster_bounds(
-        &self,
-        _params: &RenderGlyphParams,
-    ) -> Result<Bounds<DevicePixels>> {
-        todo!()
-        // let raster_bounds = self.raster_bounds.upgradable_read();
-        // if let Some(bounds) = raster_bounds.get(params) {
-        //     Ok(*bounds)
-        // } else {
-        //     let mut raster_bounds = RwLockUpgradableReadGuard::upgrade(raster_bounds);
-        //     let bounds = self.platform_text_system.glyph_raster_bounds(params)?;
-        //     raster_bounds.insert(params.clone(), bounds);
-        //     Ok(bounds)
-        // }
+    pub(crate) fn raster_bounds(&self, params: &RenderGlyphParams) -> Result<Bounds<DevicePixels>> {
+        let raster_bounds = self.raster_bounds.upgradable_read();
+        if let Some(bounds) = raster_bounds.get(params) {
+            Ok(*bounds)
+        } else {
+            let mut raster_bounds = RwLockUpgradableReadGuard::upgrade(raster_bounds);
+            let bounds = self.platform_text_system.glyph_raster_bounds(params)?;
+            raster_bounds.insert(params.clone(), bounds);
+            Ok(bounds)
+        }
     }
 
     pub(crate) fn rasterize_glyph(
         &self,
-        _params: &RenderGlyphParams,
+        params: &RenderGlyphParams,
     ) -> Result<(Size<DevicePixels>, Vec<u8>)> {
-        todo!()
-        // let raster_bounds = self.raster_bounds(params)?;
-        // self.platform_text_system
-        //     .rasterize_glyph(params, raster_bounds)
+        let raster_bounds = self.raster_bounds(params)?;
+        self.platform_text_system
+            .rasterize_glyph(params, raster_bounds)
     }
 }
 
@@ -439,13 +437,43 @@ impl WindowTextSystem {
     /// If `wrap_width` is provided, the line breaks will be adjusted to fit within the given width.
     pub fn shape_text(
         &self,
-        _text: SharedString,
+        text: SharedString,
         _font_size: Pixels,
-        _runs: &[TextRun],
-        _wrap_width: Option<Pixels>,
-        _line_clamp: Option<usize>,
-    ) -> Result<SmallVec<[WrappedLine; 1]>> {
-        todo!()
+        runs: &[TextRun],
+        wrap_width: Option<Pixels>,
+        line_clamp: Option<usize>,
+    ) -> Layout<Hsla> {
+        let mut layout_ctx = self.layout_ctx.lock();
+        let mut font_ctx = self.font_ctx.lock();
+
+        let mut builder = layout_ctx.ranged_builder(&mut font_ctx, &text, 1.0, true);
+
+        let mut offset = 0;
+        for run in runs.iter().filter(|run| run.len > 0) {
+            let range = offset..offset + run.len;
+            builder.push(StyleProperty::Brush(run.color), range.clone());
+
+            if let Some(bg) = run.background_color {
+                builder.push(StyleProperty::Brush(bg), range.clone());
+            }
+
+            if let Some(strikethough) = run.strikethrough {
+                builder.push(StyleProperty::Strikethrough(true), range.clone());
+                builder.push(
+                    StyleProperty::StrikethroughBrush(strikethough.color),
+                    range.clone(),
+                );
+                builder.push(
+                    StyleProperty::StrikethroughSize(Some(strikethough.thickness.0)),
+                    range,
+                );
+            }
+        }
+
+        let mut layout = builder.build(&text);
+        layout.break_all_lines(wrap_width.map(|px| px.0));
+
+        layout
         // let mut runs = runs.iter().filter(|run| run.len > 0).cloned().peekable();
         // let mut font_runs = self.font_runs_pool.lock().pop().unwrap_or_default();
 
@@ -567,7 +595,6 @@ impl WindowTextSystem {
     }
 
     pub(crate) fn finish_frame(&self) {
-        todo!()
         // self.line_layout_cache.finish_frame()
     }
 

@@ -177,75 +177,76 @@ impl WrapMap {
         true
     }
 
-    fn rewrap(&mut self, cx: &mut Context<Self>) {
-        self.background_task.take();
-        self.interpolated_edits.clear();
-        self.pending_edits.clear();
+    fn rewrap(&mut self, _cx: &mut Context<Self>) {
+        todo!()
+        // self.background_task.take();
+        // self.interpolated_edits.clear();
+        // self.pending_edits.clear();
 
-        if let Some(wrap_width) = self.wrap_width {
-            let mut new_snapshot = self.snapshot.clone();
+        // if let Some(wrap_width) = self.wrap_width {
+        //     let mut new_snapshot = self.snapshot.clone();
 
-            let text_system = cx.text_system().clone();
-            let (font, font_size) = self.font_with_size.clone();
-            let task = cx.background_spawn(async move {
-                let mut line_wrapper = text_system.line_wrapper(font, font_size);
-                let tab_snapshot = new_snapshot.tab_snapshot.clone();
-                let range = TabPoint::zero()..tab_snapshot.max_point();
-                let edits = new_snapshot
-                    .update(
-                        tab_snapshot,
-                        &[TabEdit {
-                            old: range.clone(),
-                            new: range.clone(),
-                        }],
-                        wrap_width,
-                        &mut line_wrapper,
-                    )
-                    .await;
-                (new_snapshot, edits)
-            });
+        //     let text_system = cx.text_system().clone();
+        //     let (font, font_size) = self.font_with_size.clone();
+        //     let task = cx.background_spawn(async move {
+        //         let mut line_wrapper = text_system.line_wrapper(font, font_size);
+        //         let tab_snapshot = new_snapshot.tab_snapshot.clone();
+        //         let range = TabPoint::zero()..tab_snapshot.max_point();
+        //         let edits = new_snapshot
+        //             .update(
+        //                 tab_snapshot,
+        //                 &[TabEdit {
+        //                     old: range.clone(),
+        //                     new: range.clone(),
+        //                 }],
+        //                 wrap_width,
+        //                 &mut line_wrapper,
+        //             )
+        //             .await;
+        //         (new_snapshot, edits)
+        //     });
 
-            match cx
-                .background_executor()
-                .block_with_timeout(Duration::from_millis(5), task)
-            {
-                Ok((snapshot, edits)) => {
-                    self.snapshot = snapshot;
-                    self.edits_since_sync = self.edits_since_sync.compose(&edits);
-                }
-                Err(wrap_task) => {
-                    self.background_task = Some(cx.spawn(async move |this, cx| {
-                        let (snapshot, edits) = wrap_task.await;
-                        this.update(cx, |this, cx| {
-                            this.snapshot = snapshot;
-                            this.edits_since_sync = this
-                                .edits_since_sync
-                                .compose(mem::take(&mut this.interpolated_edits).invert())
-                                .compose(&edits);
-                            this.background_task = None;
-                            this.flush_edits(cx);
-                            cx.notify();
-                        })
-                        .ok();
-                    }));
-                }
-            }
-        } else {
-            let old_rows = self.snapshot.transforms.summary().output.lines.row + 1;
-            self.snapshot.transforms = SumTree::default();
-            let summary = self.snapshot.tab_snapshot.text_summary();
-            if !summary.lines.is_zero() {
-                self.snapshot
-                    .transforms
-                    .push(Transform::isomorphic(summary), ());
-            }
-            let new_rows = self.snapshot.transforms.summary().output.lines.row + 1;
-            self.snapshot.interpolated = false;
-            self.edits_since_sync = self.edits_since_sync.compose(Patch::new(vec![WrapEdit {
-                old: WrapRow(0)..WrapRow(old_rows),
-                new: WrapRow(0)..WrapRow(new_rows),
-            }]));
-        }
+        //     match cx
+        //         .background_executor()
+        //         .block_with_timeout(Duration::from_millis(5), task)
+        //     {
+        //         Ok((snapshot, edits)) => {
+        //             self.snapshot = snapshot;
+        //             self.edits_since_sync = self.edits_since_sync.compose(&edits);
+        //         }
+        //         Err(wrap_task) => {
+        //             self.background_task = Some(cx.spawn(async move |this, cx| {
+        //                 let (snapshot, edits) = wrap_task.await;
+        //                 this.update(cx, |this, cx| {
+        //                     this.snapshot = snapshot;
+        //                     this.edits_since_sync = this
+        //                         .edits_since_sync
+        //                         .compose(mem::take(&mut this.interpolated_edits).invert())
+        //                         .compose(&edits);
+        //                     this.background_task = None;
+        //                     this.flush_edits(cx);
+        //                     cx.notify();
+        //                 })
+        //                 .ok();
+        //             }));
+        //         }
+        //     }
+        // } else {
+        //     let old_rows = self.snapshot.transforms.summary().output.lines.row + 1;
+        //     self.snapshot.transforms = SumTree::default();
+        //     let summary = self.snapshot.tab_snapshot.text_summary();
+        //     if !summary.lines.is_zero() {
+        //         self.snapshot
+        //             .transforms
+        //             .push(Transform::isomorphic(summary), ());
+        //     }
+        //     let new_rows = self.snapshot.transforms.summary().output.lines.row + 1;
+        //     self.snapshot.interpolated = false;
+        //     self.edits_since_sync = self.edits_since_sync.compose(Patch::new(vec![WrapEdit {
+        //         old: WrapRow(0)..WrapRow(old_rows),
+        //         new: WrapRow(0)..WrapRow(new_rows),
+        //     }]));
+        // }
     }
 
     fn flush_edits(&mut self, cx: &mut Context<Self>) {

@@ -1,11 +1,11 @@
 use crate::{
-    App, Bounds, Half, Hsla, LineLayout, Pixels, Point, Result, SharedString, StrikethroughStyle,
-    TextAlign, UnderlineStyle, Window, WrapBoundary, WrappedLineLayout, black, fill, point, px,
+    App, Bounds, Half, Hsla, LineLayout, Pixels, Point, Result, SharedString, Size,
+    StrikethroughStyle, TextAlign, UnderlineStyle, Window, WrapBoundary, black, fill, point, px,
     size,
 };
 use derive_more::{Deref, DerefMut};
 use smallvec::SmallVec;
-use std::sync::Arc;
+use std::{ops::Deref, sync::Arc};
 
 /// Set the text decoration for a run of text.
 #[derive(Debug, Clone)]
@@ -107,17 +107,29 @@ impl ShapedLine {
 }
 
 /// A line of text that has been shaped, decorated, and wrapped by the text layout system.
-#[derive(Clone, Default, Debug, Deref, DerefMut)]
+#[derive(Clone)]
 pub struct WrappedLine {
-    #[deref]
-    #[deref_mut]
-    pub(crate) layout: Arc<WrappedLineLayout>,
-    /// The text that was shaped for this line.
-    pub text: SharedString,
-    pub(crate) decoration_runs: SmallVec<[DecorationRun; 32]>,
+    pub(crate) layout: Arc<parley::Layout<Hsla>>,
+
+    pub(crate) text: SharedString,
+    pub(crate) line: usize,
+    // #[deref]
+    // #[deref_mut]
+    // pub(crate) layout: Arc<WrappedLineLayout>,
+    // /// The text that was shaped for this line.
+    // pub text: SharedString,
+    // pub(crate) decoration_runs: SmallVec<[DecorationRun; 32]>,
 }
 
 impl WrappedLine {
+    /// idk
+    pub fn size(&self) -> Size<Pixels> {
+        size(
+            px(self.layout.full_width()),
+            px(self.layout.height() / self.layout.lines().count() as f32),
+        )
+    }
+
     /// The length of the underlying, unwrapped layout, in utf-8 bytes.
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
@@ -134,24 +146,26 @@ impl WrappedLine {
         window: &mut Window,
         cx: &mut App,
     ) -> Result<()> {
-        let align_width = match bounds {
-            Some(bounds) => Some(bounds.size.width),
-            None => self.layout.wrap_width,
-        };
+        todo!()
 
-        paint_line(
-            origin,
-            &self.layout.unwrapped_layout,
-            line_height,
-            align,
-            align_width,
-            &self.decoration_runs,
-            &self.wrap_boundaries,
-            window,
-            cx,
-        )?;
+        // let align_width = match bounds {
+        //     Some(bounds) => Some(bounds.size.width),
+        //     None => self.layout.wrap_width,
+        // };
 
-        Ok(())
+        // paint_line(
+        //     origin,
+        //     &self.layout.unwrapped_layout,
+        //     line_height,
+        //     align,
+        //     align_width,
+        //     &self.decoration_runs,
+        //     &self.wrap_boundaries,
+        //     window,
+        //     cx,
+        // )?;
+
+        // Ok(())
     }
 
     /// Paint the background of line of text to the window.
@@ -164,24 +178,26 @@ impl WrappedLine {
         window: &mut Window,
         cx: &mut App,
     ) -> Result<()> {
-        let align_width = match bounds {
-            Some(bounds) => Some(bounds.size.width),
-            None => self.layout.wrap_width,
-        };
+        todo!()
 
-        paint_line_background(
-            origin,
-            &self.layout.unwrapped_layout,
-            line_height,
-            align,
-            align_width,
-            &self.decoration_runs,
-            &self.wrap_boundaries,
-            window,
-            cx,
-        )?;
+        // let align_width = match bounds {
+        //     Some(bounds) => Some(bounds.size.width),
+        //     None => self.layout.wrap_width,
+        // };
 
-        Ok(())
+        // paint_line_background(
+        //     origin,
+        //     &self.layout.unwrapped_layout,
+        //     line_height,
+        //     align,
+        //     align_width,
+        //     &self.decoration_runs,
+        //     &self.wrap_boundaries,
+        //     window,
+        //     cx,
+        // )?;
+
+        // Ok(())
     }
 }
 
