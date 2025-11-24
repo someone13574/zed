@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Bounds, DevicePixels, Hsla, Pixels, PlatformTextSystem, Point, Result, SharedString, Size,
-    StrikethroughStyle, UnderlineStyle, px,
+    StrikethroughStyle, TextAlign, UnderlineStyle, px,
 };
 // use anyhow::{Context as _, anyhow};
 // use collections::FxHashMap;
@@ -384,54 +384,6 @@ impl WindowTextSystem {
     //     // self.line_layout_cache.truncate_layouts(index)
     // }
 
-    /// Shape the given line, at the given font_size, for painting to the screen.
-    /// Subsets of the line can be styled independently with the `runs` parameter.
-    ///
-    /// Note that this method can only shape a single line of text. It will panic
-    /// if the text contains newlines. If you need to shape multiple lines of text,
-    /// use [`Self::shape_text`] instead.
-    pub fn shape_line(
-        &self,
-        _text: SharedString,
-        _font_size: Pixels,
-        _runs: &[TextRun],
-        _force_width: Option<Pixels>,
-    ) -> ShapedLine {
-        todo!()
-        // debug_assert!(
-        //     text.find('\n').is_none(),
-        //     "text argument should not contain newlines"
-        // );
-
-        // let mut decoration_runs = SmallVec::<[DecorationRun; 32]>::new();
-        // for run in runs {
-        //     if let Some(last_run) = decoration_runs.last_mut()
-        //         && last_run.color == run.color
-        //         && last_run.underline == run.underline
-        //         && last_run.strikethrough == run.strikethrough
-        //         && last_run.background_color == run.background_color
-        //     {
-        //         last_run.len += run.len as u32;
-        //         continue;
-        //     }
-        //     decoration_runs.push(DecorationRun {
-        //         len: run.len as u32,
-        //         color: run.color,
-        //         background_color: run.background_color,
-        //         underline: run.underline,
-        //         strikethrough: run.strikethrough,
-        //     });
-        // }
-
-        // let layout = self.layout_line(&text, font_size, runs, force_width);
-
-        // ShapedLine {
-        //     layout,
-        //     text,
-        //     decoration_runs,
-        // }
-    }
-
     /// Shape a multi line string of text, at the given font_size, for painting to the screen.
     /// Subsets of the text can be styled independently with the `runs` parameter.
     /// If `wrap_width` is provided, the line breaks will be adjusted to fit within the given width.
@@ -451,6 +403,8 @@ impl WindowTextSystem {
         let mut offset = 0;
         for run in runs.iter().filter(|run| run.len > 0) {
             let range = offset..offset + run.len;
+            offset += run.len;
+
             builder.push(StyleProperty::Brush(run.color), range.clone());
 
             if let Some(bg) = run.background_color {

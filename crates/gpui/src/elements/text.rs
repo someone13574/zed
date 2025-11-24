@@ -2,8 +2,9 @@ use crate::{
     ActiveTooltip, AnyView, App, Bounds, DispatchPhase, Element, ElementId, FontId,
     GlobalElementId, GlyphId, HighlightStyle, Hitbox, HitboxBehavior, Hsla, InspectorElementId,
     IntoElement, LayoutId, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
-    SharedString, Size, TextOverflow, TextRun, TextStyle, TooltipId, WhiteSpace, Window,
-    WrappedLineLayout, point, px, register_tooltip_mouse_handlers, set_tooltip_on_window, size,
+    SharedString, Size, StrikethroughStyle, TextOverflow, TextRun, TextStyle, TooltipId,
+    UnderlineStyle, WhiteSpace, Window, WrappedLineLayout, point, px,
+    register_tooltip_mouse_handlers, set_tooltip_on_window, size,
 };
 use anyhow::Context as _;
 use std::{
@@ -14,7 +15,6 @@ use std::{
     rc::Rc,
     sync::Arc,
 };
-use util::ResultExt;
 
 impl Element for &'static str {
     type RequestLayoutState = TextLayout;
@@ -46,10 +46,10 @@ impl Element for &'static str {
         _inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         text_layout: &mut Self::RequestLayoutState,
-        _window: &mut Window,
+        window: &mut Window,
         _cx: &mut App,
     ) {
-        text_layout.prepaint(bounds, self)
+        text_layout.prepaint(bounds, self, window)
     }
 
     fn paint(
@@ -112,10 +112,10 @@ impl Element for SharedString {
         _inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         text_layout: &mut Self::RequestLayoutState,
-        _window: &mut Window,
+        window: &mut Window,
         _cx: &mut App,
     ) {
-        text_layout.prepaint(bounds, self.as_ref())
+        text_layout.prepaint(bounds, self.as_ref(), window)
     }
 
     fn paint(
@@ -279,10 +279,10 @@ impl Element for StyledText {
         _inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         _: &mut Self::RequestLayoutState,
-        _window: &mut Window,
+        window: &mut Window,
         _cx: &mut App,
     ) {
-        self.layout.prepaint(bounds, &self.text)
+        self.layout.prepaint(bounds, &self.text, window)
     }
 
     fn paint(
@@ -432,13 +432,24 @@ impl TextLayout {
         })
     }
 
-    fn prepaint(&self, bounds: Bounds<Pixels>, text: &str) {
+    fn prepaint(&self, bounds: Bounds<Pixels>, text: &str, window: &mut Window) {
         let mut element_state = self.0.borrow_mut();
         let element_state = element_state
             .as_mut()
             .with_context(|| format!("measurement has not been performed on {text}"))
             .unwrap();
         element_state.bounds = Some(bounds);
+        element_state.layout.align(
+            Some(bounds.size.width.0),
+            match window.text_style().text_align {
+                crate::TextAlign::Left => parley::Alignment::Left,
+                crate::TextAlign::Center => parley::Alignment::Center,
+                crate::TextAlign::Right => parley::Alignment::Right,
+            },
+            parley::AlignmentOptions {
+                align_when_overflowing: true,
+            },
+        );
     }
 
     fn paint(&self, text: &str, window: &mut Window, cx: &mut App) {
@@ -478,11 +489,45 @@ impl TextLayout {
                                 .unwrap();
                             run_x += glyph.advance;
                         }
+
+                        if let Some(underline) = text_style.underline {
+                            window.paint_underline(
+                                point(
+                                    px(glyph_run.offset()) + bounds.origin.x,
+                                    px(glyph_run.baseline()
+                                        + glyph_run.run().metrics().underline_offset)
+                                        + bounds.origin.y,
+                                ),
+                                glyph_run.advance().into(),
+                                &UnderlineStyle {
+                                    thickness: underline.thickness,
+                                    color: Some(underline.color.unwrap_or(glyph_run.style().brush)),
+                                    wavy: false,
+                                },
+                            );
+                        }
+
+                        if let Some(strikethrough) = &glyph_run.style().strikethrough {
+                            window.paint_strikethrough(
+                                point(
+                                    px(glyph_run.offset()) + bounds.origin.x,
+                                    px(glyph_run.baseline()
+                                        - glyph_run.run().metrics().strikethrough_offset)
+                                        + bounds.origin.y,
+                                ),
+                                glyph_run.advance().into(),
+                                &StrikethroughStyle {
+                                    thickness: strikethrough.size.unwrap().into(),
+                                    color: Some(strikethrough.brush),
+                                },
+                            );
+                        }
                     }
                     parley::PositionedLayoutItem::InlineBox(positioned_inline_box) => todo!(),
                 }
             }
         }
+
         // for line in &element_state.lines {
         //     line.paint_background(
         //         line_origin,
