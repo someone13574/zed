@@ -122,14 +122,6 @@ pub struct WrappedLine {
 }
 
 impl WrappedLine {
-    /// idk
-    pub fn size(&self) -> Size<Pixels> {
-        size(
-            px(self.layout.full_width()),
-            px(self.layout.height() / self.layout.lines().count() as f32),
-        )
-    }
-
     /// The length of the underlying, unwrapped layout, in utf-8 bytes.
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {

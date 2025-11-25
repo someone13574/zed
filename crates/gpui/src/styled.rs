@@ -9,6 +9,7 @@ pub use gpui_macros::{
     overflow_style_methods, padding_style_methods, position_style_methods,
     visibility_style_methods,
 };
+use parley::Alignment;
 const ELLIPSIS: SharedString = SharedString::new_static("…");
 
 /// A trait for elements that can be styled.

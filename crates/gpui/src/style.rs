@@ -12,6 +12,7 @@ use crate::{
     point, quad, rems, size,
 };
 use collections::HashSet;
+pub use parley::Alignment;
 use refineable::Refineable;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -337,6 +338,7 @@ pub enum TextOverflow {
 /// How to align text within the element
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum TextAlign {
+    // TODO_parley: all alignments
     /// Align the text to the left of the element
     #[default]
     Left,

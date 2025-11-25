@@ -1,7 +1,7 @@
 use crate::{
     ActiveTooltip, AnyView, App, Bounds, DispatchPhase, Element, ElementId, FontId,
     GlobalElementId, GlyphId, HighlightStyle, Hitbox, HitboxBehavior, Hsla, InspectorElementId,
-    IntoElement, LayoutId, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
+    IntoElement, LayoutId, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ShapedText,
     SharedString, Size, StrikethroughStyle, TextOverflow, TextRun, TextStyle, TooltipId,
     UnderlineStyle, WhiteSpace, Window, WrappedLineLayout, point, px,
     register_tooltip_mouse_handlers, set_tooltip_on_window, size,
@@ -313,7 +313,7 @@ pub struct TextLayout(Rc<RefCell<Option<TextLayoutInner>>>);
 
 struct TextLayoutInner {
     len: usize,
-    layout: parley::Layout<Hsla>,
+    shaped_text: ShapedText,
     line_height: Pixels,
     wrap_width: Option<Pixels>,
     size: Option<Size<Pixels>>,
@@ -390,9 +390,10 @@ impl TextLayout {
                 };
                 let len = text.len();
 
-                let layout = window.text_system().shape_text(
+                let shaped_text = window.text_system().shape_text(
                     text,
                     font_size,
+                    line_height,
                     &runs,
                     wrap_width,
                     text_style.line_clamp,
@@ -416,10 +417,9 @@ impl TextLayout {
                 //     return Size::default();
                 // };
 
-                let mut size: Size<Pixels> = size(layout.width().into(), layout.height().into());
-
+                let size = shaped_text.size();
                 element_state.0.borrow_mut().replace(TextLayoutInner {
-                    layout,
+                    shaped_text,
                     len,
                     line_height,
                     wrap_width,
@@ -439,17 +439,9 @@ impl TextLayout {
             .with_context(|| format!("measurement has not been performed on {text}"))
             .unwrap();
         element_state.bounds = Some(bounds);
-        element_state.layout.align(
-            Some(bounds.size.width.0),
-            match window.text_style().text_align {
-                crate::TextAlign::Left => parley::Alignment::Left,
-                crate::TextAlign::Center => parley::Alignment::Center,
-                crate::TextAlign::Right => parley::Alignment::Right,
-            },
-            parley::AlignmentOptions {
-                align_when_overflowing: true,
-            },
-        );
+        element_state
+            .shaped_text
+            .align(bounds.size.width, window.text_style().text_align);
     }
 
     fn paint(&self, text: &str, window: &mut Window, cx: &mut App) {
@@ -467,66 +459,7 @@ impl TextLayout {
         let mut line_origin = bounds.origin;
         let text_style = window.text_style();
 
-        for line in element_state.layout.lines() {
-            for item in line.items() {
-                match item {
-                    parley::PositionedLayoutItem::GlyphRun(glyph_run) => {
-                        let mut run_x = glyph_run.offset() + bounds.origin.x.0;
-                        let run_y = glyph_run.baseline() + bounds.origin.y.0;
-                        let font = glyph_run.run().font();
-                        let font_size = glyph_run.run().font_size();
-
-                        for glyph in glyph_run.glyphs() {
-                            window.text_system().add_font(font.clone()).unwrap();
-                            window
-                                .paint_glyph(
-                                    point(px(run_x), px(run_y)),
-                                    FontId(font.data.id(), font.index),
-                                    GlyphId(glyph.id),
-                                    px(font_size),
-                                    glyph_run.style().brush,
-                                )
-                                .unwrap();
-                            run_x += glyph.advance;
-                        }
-
-                        if let Some(underline) = text_style.underline {
-                            window.paint_underline(
-                                point(
-                                    px(glyph_run.offset()) + bounds.origin.x,
-                                    px(glyph_run.baseline()
-                                        + glyph_run.run().metrics().underline_offset)
-                                        + bounds.origin.y,
-                                ),
-                                glyph_run.advance().into(),
-                                &UnderlineStyle {
-                                    thickness: underline.thickness,
-                                    color: Some(underline.color.unwrap_or(glyph_run.style().brush)),
-                                    wavy: false,
-                                },
-                            );
-                        }
-
-                        if let Some(strikethrough) = &glyph_run.style().strikethrough {
-                            window.paint_strikethrough(
-                                point(
-                                    px(glyph_run.offset()) + bounds.origin.x,
-                                    px(glyph_run.baseline()
-                                        - glyph_run.run().metrics().strikethrough_offset)
-                                        + bounds.origin.y,
-                                ),
-                                glyph_run.advance().into(),
-                                &StrikethroughStyle {
-                                    thickness: strikethrough.size.unwrap().into(),
-                                    color: Some(strikethrough.brush),
-                                },
-                            );
-                        }
-                    }
-                    parley::PositionedLayoutItem::InlineBox(positioned_inline_box) => todo!(),
-                }
-            }
-        }
+        element_state.shaped_text.paint(bounds.origin, window);
 
         // for line in &element_state.lines {
         //     line.paint_background(

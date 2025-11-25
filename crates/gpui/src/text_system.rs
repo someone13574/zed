@@ -12,13 +12,17 @@ pub use line::*;
 pub use line_layout::*;
 pub use line_wrapper::*;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
-use parley::{FontContext, FontData, Layout, LayoutContext, PositionedLayoutItem, StyleProperty};
+use parley::{
+    Alignment, AlignmentOptions, FontContext, FontData, Layout, LayoutContext, LineHeight,
+    PositionedLayoutItem, StyleProperty,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Bounds, DevicePixels, Hsla, Pixels, PlatformTextSystem, Point, Result, SharedString, Size,
-    StrikethroughStyle, TextAlign, UnderlineStyle, px,
+    App, Bounds, DefiniteLength, DevicePixels, Hsla, Pixels, PlatformTextSystem, Point, Result,
+    SharedString, Size, StrikethroughStyle, TextAlign, UnderlineStyle, Window, fill, point, px,
+    size,
 };
 // use anyhow::{Context as _, anyhow};
 // use collections::FxHashMap;
@@ -58,7 +62,7 @@ pub(crate) const SUBPIXEL_VARIANTS_Y: u8 =
 pub struct TextSystem {
     platform_text_system: Arc<dyn PlatformTextSystem>,
     font_ctx: Mutex<FontContext>,
-    layout_ctx: Mutex<LayoutContext<Hsla>>,
+    layout_ctx: Mutex<LayoutContext<Brush>>,
     // font_ids_by_font: RwLock<FxHashMap<Font, Result<FontId>>>,
     // font_metrics: RwLock<FxHashMap<FontId, FontMetrics>>,
     raster_bounds: RwLock<FxHashMap<RenderGlyphParams, Bounds<DevicePixels>>>,
@@ -390,44 +394,64 @@ impl WindowTextSystem {
     pub fn shape_text(
         &self,
         text: SharedString,
-        _font_size: Pixels,
+        font_size: Pixels,
+        line_height: Pixels,
         runs: &[TextRun],
         wrap_width: Option<Pixels>,
         line_clamp: Option<usize>,
-    ) -> Layout<Hsla> {
+    ) -> ShapedText {
         let mut layout_ctx = self.layout_ctx.lock();
         let mut font_ctx = self.font_ctx.lock();
 
         let mut builder = layout_ctx.ranged_builder(&mut font_ctx, &text, 1.0, true);
+        builder.push_default(StyleProperty::FontSize(font_size.0));
+        builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(
+            line_height.0, // TODO_parley: allow metric here
+        )));
 
         let mut offset = 0;
         for run in runs.iter().filter(|run| run.len > 0) {
             let range = offset..offset + run.len;
             offset += run.len;
 
-            builder.push(StyleProperty::Brush(run.color), range.clone());
+            builder.push(
+                StyleProperty::FontStyle(match run.font.style {
+                    FontStyle::Normal => parley::FontStyle::Normal,
+                    FontStyle::Italic => parley::FontStyle::Italic,
+                    FontStyle::Oblique => parley::FontStyle::Oblique(None),
+                }),
+                range.clone(),
+            );
 
-            if let Some(bg) = run.background_color {
-                builder.push(StyleProperty::Brush(bg), range.clone());
-            }
+            builder.push(
+                StyleProperty::FontWeight(parley::FontWeight::new(run.font.weight.0)),
+                range.clone(),
+            );
 
-            if let Some(strikethough) = run.strikethrough {
-                builder.push(StyleProperty::Strikethrough(true), range.clone());
-                builder.push(
-                    StyleProperty::StrikethroughBrush(strikethough.color),
-                    range.clone(),
-                );
-                builder.push(
-                    StyleProperty::StrikethroughSize(Some(strikethough.thickness.0)),
-                    range,
-                );
-            }
+            builder.push(
+                StyleProperty::Brush(Brush {
+                    color: run.color,
+                    background: run.background_color,
+                    underline: run.underline.map(|mut underline| {
+                        underline.color = underline.color.or(Some(run.color));
+                        underline
+                    }),
+                    strikethrough: run.strikethrough.map(|mut strikethrough| {
+                        strikethrough.color = strikethrough.color.or(Some(run.color));
+                        strikethrough
+                    }),
+                }),
+                range.clone(),
+            );
         }
 
         let mut layout = builder.build(&text);
         layout.break_all_lines(wrap_width.map(|px| px.0));
 
-        layout
+        ShapedText {
+            layout,
+            line_height,
+        }
         // let mut runs = runs.iter().filter(|run| run.len > 0).cloned().peekable();
         // let mut font_runs = self.font_runs_pool.lock().pop().unwrap_or_default();
 
@@ -608,6 +632,133 @@ impl WindowTextSystem {
         // self.font_runs_pool.lock().push(font_runs);
 
         // layout
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Brush {
+    color: Hsla,
+    background: Option<Hsla>,
+    underline: Option<UnderlineStyle>,
+    strikethrough: Option<StrikethroughStyle>,
+}
+
+impl Default for Brush {
+    fn default() -> Self {
+        Self {
+            color: gpui::black(),
+            background: None,
+            underline: None,
+            strikethrough: None,
+        }
+    }
+}
+
+/// Text which has been shaped and laid-out
+pub struct ShapedText {
+    layout: Layout<Brush>,
+    line_height: Pixels,
+}
+
+impl ShapedText {
+    /// The size of the whole wrapped text. This can span multiple lines if there are multiple wrap boundaries.
+    pub fn size(&self) -> Size<Pixels> {
+        size(self.layout.width().into(), self.layout.height().into())
+    }
+
+    /// Sets the alignment of the shaped text within a container
+    pub fn align(&mut self, container_width: Pixels, alignment: TextAlign) {
+        self.layout.align(
+            Some(container_width.0),
+            match alignment {
+                TextAlign::Left => Alignment::Left,
+                TextAlign::Center => Alignment::Center,
+                TextAlign::Right => Alignment::Right,
+            },
+            AlignmentOptions {
+                align_when_overflowing: true,
+            },
+        );
+    }
+
+    /// Paints the text to the window
+    pub fn paint(&self, origin: Point<Pixels>, window: &mut Window) {
+        let bounds = Bounds::new(
+            origin,
+            size(self.layout.width().into(), self.layout.height().into()),
+        );
+
+        window.paint_layer(bounds, |window| {
+            for (line_idx, line) in self.layout.lines().enumerate() {
+                for item in line.items() {
+                    match item {
+                        PositionedLayoutItem::GlyphRun(glyph_run) => {
+                            let run_origin =
+                                origin + point(px(glyph_run.offset()), px(glyph_run.baseline()));
+                            let mut glyph_origin = run_origin;
+
+                            let font = glyph_run.run().font();
+                            let font_size = px(glyph_run.run().font_size());
+                            window.text_system().add_font(font.clone()).unwrap();
+
+                            let brush = &glyph_run.style().brush;
+                            if let Some(bg) = brush.background {
+                                window.paint_quad(fill(
+                                    Bounds::new(
+                                        origin
+                                            + point(
+                                                px(glyph_run.offset()),
+                                                self.line_height * line_idx,
+                                            ),
+                                        size(glyph_run.advance().into(), self.line_height),
+                                    ),
+                                    bg,
+                                ));
+                            }
+
+                            for glyph in glyph_run.glyphs() {
+                                window
+                                    .paint_glyph(
+                                        glyph_origin,
+                                        FontId(font.data.id(), font.index),
+                                        GlyphId(glyph.id),
+                                        font_size,
+                                        brush.color,
+                                    )
+                                    .unwrap();
+
+                                glyph_origin.x += px(glyph.advance);
+                            }
+
+                            if let Some(underline) = brush.underline {
+                                window.paint_underline(
+                                    run_origin
+                                        - point(
+                                            px(0.0),
+                                            glyph_run.run().metrics().underline_offset.into(),
+                                        ),
+                                    glyph_run.advance().into(),
+                                    &underline,
+                                );
+                            }
+
+                            if let Some(strikethrough) = brush.strikethrough {
+                                window.paint_strikethrough(
+                                    run_origin
+                                        - point(
+                                            px(0.0),
+                                            glyph_run.run().metrics().strikethrough_offset.into(),
+                                        ),
+                                    glyph_run.advance().into(),
+                                    &strikethrough,
+                                );
+                            }
+                        }
+                        PositionedLayoutItem::InlineBox(_positioned_inline_box) => todo!(),
+                    }
+                }
+            }
+        });
     }
 }
 
