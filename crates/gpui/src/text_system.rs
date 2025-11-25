@@ -8,6 +8,7 @@ use collections::FxHashMap;
 pub use font_fallbacks::*;
 pub use font_features::*;
 use image::imageops::FilterType::Lanczos3;
+use itertools::Itertools;
 pub use line::*;
 pub use line_layout::*;
 pub use line_wrapper::*;
@@ -450,6 +451,7 @@ impl WindowTextSystem {
 
         ShapedText {
             layout,
+            text,
             line_height,
         }
         // let mut runs = runs.iter().filter(|run| run.len > 0).cloned().peekable();
@@ -657,6 +659,8 @@ impl Default for Brush {
 /// Text which has been shaped and laid-out
 pub struct ShapedText {
     layout: Layout<Brush>,
+    /// The text that was shaped
+    pub text: SharedString,
     line_height: Pixels,
 }
 
@@ -679,6 +683,103 @@ impl ShapedText {
                 align_when_overflowing: true,
             },
         );
+    }
+
+    /// The utf8 byte-index for the character at the given coordinates
+    pub fn index_for_position(&self, position: Point<Pixels>) -> Option<usize> {
+        let line_count = self.layout.len();
+        if position.y < px(0.0) || position.y > self.size().height || line_count == 0 {
+            return None;
+        };
+
+        if line_count == 0 {
+            return None;
+        }
+
+        let line_idx = ((position.y / self.line_height).floor() as usize).min(line_count - 1);
+        let line = self.layout.get(line_idx)?;
+
+        for item in line.items() {
+            let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
+                continue;
+            };
+
+            let mut offset = px(glyph_run.offset());
+            for cluster in glyph_run.run().clusters() {
+                let next = offset + cluster.advance().into();
+                if position.x < next {
+                    return Some(cluster.text_range().start);
+                }
+
+                offset = next;
+            }
+        }
+
+        None
+    }
+
+    /// The utf8 byte-index for the character closest to the given coordinates
+    pub fn closest_index_for_position(&self, position: Point<Pixels>) -> usize {
+        let line_count = self.layout.len();
+        if position.y < px(0.0) || line_count == 0 {
+            return 0;
+        } else if position.y > self.size().height {
+            return self.text.len();
+        }
+
+        let line_idx =
+            ((position.y / self.line_height).floor() as usize).min(self.layout.lines().count());
+        let Some(line) = self.layout.get(line_idx) else {
+            return self.text.len();
+        };
+
+        let mut last = self.text.len();
+        for item in line.items() {
+            let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
+                continue;
+            };
+
+            let mut offset = px(glyph_run.offset());
+            for cluster in glyph_run.run().clusters() {
+                if position.x < offset + px(cluster.advance() / 2.0) {
+                    return cluster.text_range().start;
+                } else {
+                    last = cluster.text_range().end;
+                }
+
+                offset += cluster.advance().into();
+            }
+        }
+
+        last
+    }
+
+    /// The position of the character at the given utf8 byte-index
+    pub fn position_for_index(&self, index: usize) -> Point<Pixels> {
+        let mut last = px(self.layout.width());
+        for line in self.layout.lines() {
+            for item in line.items() {
+                let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
+                    continue;
+                };
+
+                let mut origin = point(px(glyph_run.offset()), px(glyph_run.baseline()));
+                for cluster in glyph_run.run().clusters() {
+                    let next = origin.x + cluster.advance().into();
+
+                    if cluster.text_range().contains(&index) {
+                        return origin;
+                    } else {
+                        last = next;
+                    }
+
+                    origin.x = next;
+                }
+            }
+        }
+
+        // Can't return layout.width() directly since we need to account for trailing spaces
+        point(last, self.layout.height().into())
     }
 
     /// Paints the text to the window
