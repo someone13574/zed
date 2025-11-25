@@ -178,7 +178,7 @@ impl WrapMap {
     }
 
     fn rewrap(&mut self, _cx: &mut Context<Self>) {
-        todo!()
+        // todo!()
         // self.background_task.take();
         // self.interpolated_edits.clear();
         // self.pending_edits.clear();
@@ -277,10 +277,10 @@ impl WrapMap {
                 let mut edits = Patch::default();
                 let mut line_wrapper = text_system.line_wrapper(font, font_size);
                 for (tab_snapshot, tab_edits) in pending_edits {
-                    let wrap_edits = snapshot
-                        .update(tab_snapshot, &tab_edits, wrap_width, &mut line_wrapper)
-                        .await;
-                    edits = edits.compose(&wrap_edits);
+                    // let wrap_edits = snapshot
+                    //     .update(tab_snapshot, &tab_edits, wrap_width, &mut line_wrapper)
+                    //     .await;
+                    // edits = edits.compose(&wrap_edits);
                 }
                 (snapshot, edits)
             });
@@ -412,164 +412,164 @@ impl WrapSnapshot {
         old_snapshot.compute_edits(tab_edits, self)
     }
 
-    async fn update(
-        &mut self,
-        new_tab_snapshot: TabSnapshot,
-        tab_edits: &[TabEdit],
-        wrap_width: Pixels,
-        line_wrapper: &mut LineWrapper,
-    ) -> WrapPatch {
-        #[derive(Debug)]
-        struct RowEdit {
-            old_rows: Range<u32>,
-            new_rows: Range<u32>,
-        }
+    // async fn update(
+    //     &mut self,
+    //     new_tab_snapshot: TabSnapshot,
+    //     tab_edits: &[TabEdit],
+    //     wrap_width: Pixels,
+    //     line_wrapper: &mut LineWrapper,
+    // ) -> WrapPatch {
+    //     #[derive(Debug)]
+    //     struct RowEdit {
+    //         old_rows: Range<u32>,
+    //         new_rows: Range<u32>,
+    //     }
 
-        let mut tab_edits_iter = tab_edits.iter().peekable();
-        let mut row_edits = Vec::with_capacity(tab_edits.len());
-        while let Some(edit) = tab_edits_iter.next() {
-            let mut row_edit = RowEdit {
-                old_rows: edit.old.start.row()..edit.old.end.row() + 1,
-                new_rows: edit.new.start.row()..edit.new.end.row() + 1,
-            };
+    //     let mut tab_edits_iter = tab_edits.iter().peekable();
+    //     let mut row_edits = Vec::with_capacity(tab_edits.len());
+    //     while let Some(edit) = tab_edits_iter.next() {
+    //         let mut row_edit = RowEdit {
+    //             old_rows: edit.old.start.row()..edit.old.end.row() + 1,
+    //             new_rows: edit.new.start.row()..edit.new.end.row() + 1,
+    //         };
 
-            while let Some(next_edit) = tab_edits_iter.peek() {
-                if next_edit.old.start.row() <= row_edit.old_rows.end {
-                    row_edit.old_rows.end = next_edit.old.end.row() + 1;
-                    row_edit.new_rows.end = next_edit.new.end.row() + 1;
-                    tab_edits_iter.next();
-                } else {
-                    break;
-                }
-            }
+    //         while let Some(next_edit) = tab_edits_iter.peek() {
+    //             if next_edit.old.start.row() <= row_edit.old_rows.end {
+    //                 row_edit.old_rows.end = next_edit.old.end.row() + 1;
+    //                 row_edit.new_rows.end = next_edit.new.end.row() + 1;
+    //                 tab_edits_iter.next();
+    //             } else {
+    //                 break;
+    //             }
+    //         }
 
-            row_edits.push(row_edit);
-        }
+    //         row_edits.push(row_edit);
+    //     }
 
-        let mut new_transforms;
-        if row_edits.is_empty() {
-            new_transforms = self.transforms.clone();
-        } else {
-            let mut row_edits = row_edits.into_iter().peekable();
-            let mut old_cursor = self.transforms.cursor::<TabPoint>(());
+    //     let mut new_transforms;
+    //     if row_edits.is_empty() {
+    //         new_transforms = self.transforms.clone();
+    //     } else {
+    //         let mut row_edits = row_edits.into_iter().peekable();
+    //         let mut old_cursor = self.transforms.cursor::<TabPoint>(());
 
-            new_transforms = old_cursor.slice(
-                &TabPoint::new(row_edits.peek().unwrap().old_rows.start, 0),
-                Bias::Right,
-            );
+    //         new_transforms = old_cursor.slice(
+    //             &TabPoint::new(row_edits.peek().unwrap().old_rows.start, 0),
+    //             Bias::Right,
+    //         );
 
-            while let Some(edit) = row_edits.next() {
-                if edit.new_rows.start > new_transforms.summary().input.lines.row {
-                    let summary = new_tab_snapshot.text_summary_for_range(
-                        TabPoint(new_transforms.summary().input.lines)
-                            ..TabPoint::new(edit.new_rows.start, 0),
-                    );
-                    new_transforms.push_or_extend(Transform::isomorphic(summary));
-                }
+    //         while let Some(edit) = row_edits.next() {
+    //             if edit.new_rows.start > new_transforms.summary().input.lines.row {
+    //                 let summary = new_tab_snapshot.text_summary_for_range(
+    //                     TabPoint(new_transforms.summary().input.lines)
+    //                         ..TabPoint::new(edit.new_rows.start, 0),
+    //                 );
+    //                 new_transforms.push_or_extend(Transform::isomorphic(summary));
+    //             }
 
-                let mut line = String::new();
-                let mut line_fragments = Vec::new();
-                let mut remaining = None;
-                let mut chunks = new_tab_snapshot.chunks(
-                    TabPoint::new(edit.new_rows.start, 0)..new_tab_snapshot.max_point(),
-                    false,
-                    Highlights::default(),
-                );
-                let mut edit_transforms = Vec::<Transform>::new();
-                for _ in edit.new_rows.start..edit.new_rows.end {
-                    while let Some(chunk) = remaining.take().or_else(|| chunks.next()) {
-                        if let Some(ix) = chunk.text.find('\n') {
-                            let (prefix, suffix) = chunk.text.split_at(ix + 1);
-                            line_fragments.push(gpui::LineFragment::text(prefix));
-                            line.push_str(prefix);
-                            remaining = Some(Chunk {
-                                text: suffix,
-                                ..chunk
-                            });
-                            break;
-                        } else {
-                            if let Some(width) =
-                                chunk.renderer.as_ref().and_then(|r| r.measured_width)
-                            {
-                                line_fragments
-                                    .push(gpui::LineFragment::element(width, chunk.text.len()));
-                            } else {
-                                line_fragments.push(gpui::LineFragment::text(chunk.text));
-                            }
-                            line.push_str(chunk.text);
-                        }
-                    }
+    //             let mut line = String::new();
+    //             let mut line_fragments = Vec::new();
+    //             let mut remaining = None;
+    //             let mut chunks = new_tab_snapshot.chunks(
+    //                 TabPoint::new(edit.new_rows.start, 0)..new_tab_snapshot.max_point(),
+    //                 false,
+    //                 Highlights::default(),
+    //             );
+    //             let mut edit_transforms = Vec::<Transform>::new();
+    //             for _ in edit.new_rows.start..edit.new_rows.end {
+    //                 while let Some(chunk) = remaining.take().or_else(|| chunks.next()) {
+    //                     if let Some(ix) = chunk.text.find('\n') {
+    //                         let (prefix, suffix) = chunk.text.split_at(ix + 1);
+    //                         line_fragments.push(gpui::LineFragment::text(prefix));
+    //                         line.push_str(prefix);
+    //                         remaining = Some(Chunk {
+    //                             text: suffix,
+    //                             ..chunk
+    //                         });
+    //                         break;
+    //                     } else {
+    //                         if let Some(width) =
+    //                             chunk.renderer.as_ref().and_then(|r| r.measured_width)
+    //                         {
+    //                             line_fragments
+    //                                 .push(gpui::LineFragment::element(width, chunk.text.len()));
+    //                         } else {
+    //                             line_fragments.push(gpui::LineFragment::text(chunk.text));
+    //                         }
+    //                         line.push_str(chunk.text);
+    //                     }
+    //                 }
 
-                    if line.is_empty() {
-                        break;
-                    }
+    //                 if line.is_empty() {
+    //                     break;
+    //                 }
 
-                    let mut prev_boundary_ix = 0;
-                    for boundary in line_wrapper.wrap_line(&line_fragments, wrap_width) {
-                        let wrapped = &line[prev_boundary_ix..boundary.ix];
-                        push_isomorphic(&mut edit_transforms, TextSummary::from(wrapped));
-                        edit_transforms.push(Transform::wrap(boundary.next_indent));
-                        prev_boundary_ix = boundary.ix;
-                    }
+    //                 let mut prev_boundary_ix = 0;
+    //                 for boundary in line_wrapper.wrap_line(&line_fragments, wrap_width) {
+    //                     let wrapped = &line[prev_boundary_ix..boundary.ix];
+    //                     push_isomorphic(&mut edit_transforms, TextSummary::from(wrapped));
+    //                     edit_transforms.push(Transform::wrap(boundary.next_indent));
+    //                     prev_boundary_ix = boundary.ix;
+    //                 }
 
-                    if prev_boundary_ix < line.len() {
-                        push_isomorphic(
-                            &mut edit_transforms,
-                            TextSummary::from(&line[prev_boundary_ix..]),
-                        );
-                    }
+    //                 if prev_boundary_ix < line.len() {
+    //                     push_isomorphic(
+    //                         &mut edit_transforms,
+    //                         TextSummary::from(&line[prev_boundary_ix..]),
+    //                     );
+    //                 }
 
-                    line.clear();
-                    line_fragments.clear();
-                    yield_now().await;
-                }
+    //                 line.clear();
+    //                 line_fragments.clear();
+    //                 yield_now().await;
+    //             }
 
-                let mut edit_transforms = edit_transforms.into_iter();
-                if let Some(transform) = edit_transforms.next() {
-                    new_transforms.push_or_extend(transform);
-                }
-                new_transforms.extend(edit_transforms, ());
+    //             let mut edit_transforms = edit_transforms.into_iter();
+    //             if let Some(transform) = edit_transforms.next() {
+    //                 new_transforms.push_or_extend(transform);
+    //             }
+    //             new_transforms.extend(edit_transforms, ());
 
-                old_cursor.seek_forward(&TabPoint::new(edit.old_rows.end, 0), Bias::Right);
-                if let Some(next_edit) = row_edits.peek() {
-                    if next_edit.old_rows.start > old_cursor.end().row() {
-                        if old_cursor.end() > TabPoint::new(edit.old_rows.end, 0) {
-                            let summary = self.tab_snapshot.text_summary_for_range(
-                                TabPoint::new(edit.old_rows.end, 0)..old_cursor.end(),
-                            );
-                            new_transforms.push_or_extend(Transform::isomorphic(summary));
-                        }
-                        old_cursor.next();
-                        new_transforms.append(
-                            old_cursor
-                                .slice(&TabPoint::new(next_edit.old_rows.start, 0), Bias::Right),
-                            (),
-                        );
-                    }
-                } else {
-                    if old_cursor.end() > TabPoint::new(edit.old_rows.end, 0) {
-                        let summary = self.tab_snapshot.text_summary_for_range(
-                            TabPoint::new(edit.old_rows.end, 0)..old_cursor.end(),
-                        );
-                        new_transforms.push_or_extend(Transform::isomorphic(summary));
-                    }
-                    old_cursor.next();
-                    new_transforms.append(old_cursor.suffix(), ());
-                }
-            }
-        }
+    //             old_cursor.seek_forward(&TabPoint::new(edit.old_rows.end, 0), Bias::Right);
+    //             if let Some(next_edit) = row_edits.peek() {
+    //                 if next_edit.old_rows.start > old_cursor.end().row() {
+    //                     if old_cursor.end() > TabPoint::new(edit.old_rows.end, 0) {
+    //                         let summary = self.tab_snapshot.text_summary_for_range(
+    //                             TabPoint::new(edit.old_rows.end, 0)..old_cursor.end(),
+    //                         );
+    //                         new_transforms.push_or_extend(Transform::isomorphic(summary));
+    //                     }
+    //                     old_cursor.next();
+    //                     new_transforms.append(
+    //                         old_cursor
+    //                             .slice(&TabPoint::new(next_edit.old_rows.start, 0), Bias::Right),
+    //                         (),
+    //                     );
+    //                 }
+    //             } else {
+    //                 if old_cursor.end() > TabPoint::new(edit.old_rows.end, 0) {
+    //                     let summary = self.tab_snapshot.text_summary_for_range(
+    //                         TabPoint::new(edit.old_rows.end, 0)..old_cursor.end(),
+    //                     );
+    //                     new_transforms.push_or_extend(Transform::isomorphic(summary));
+    //                 }
+    //                 old_cursor.next();
+    //                 new_transforms.append(old_cursor.suffix(), ());
+    //             }
+    //         }
+    //     }
 
-        let old_snapshot = mem::replace(
-            self,
-            WrapSnapshot {
-                tab_snapshot: new_tab_snapshot,
-                transforms: new_transforms,
-                interpolated: false,
-            },
-        );
-        self.check_invariants();
-        old_snapshot.compute_edits(tab_edits, self)
-    }
+    //     let old_snapshot = mem::replace(
+    //         self,
+    //         WrapSnapshot {
+    //             tab_snapshot: new_tab_snapshot,
+    //             transforms: new_transforms,
+    //             interpolated: false,
+    //         },
+    //     );
+    //     self.check_invariants();
+    //     old_snapshot.compute_edits(tab_edits, self)
+    // }
 
     fn compute_edits(&self, tab_edits: &[TabEdit], new_snapshot: &WrapSnapshot) -> WrapPatch {
         let mut wrap_edits = Vec::with_capacity(tab_edits.len());
@@ -1277,7 +1277,8 @@ mod tests {
         log::info!("TabMap text: {:?}", tabs_snapshot.text());
 
         let mut line_wrapper = text_system.line_wrapper(font.clone(), font_size);
-        let expected_text = wrap_text(&tabs_snapshot, wrap_width, &mut line_wrapper);
+        // let expected_text = wrap_text(&tabs_snapshot, wrap_width, &mut line_wrapper);
+        let expected_text = String::new();
 
         let (wrap_map, _) =
             cx.update(|cx| WrapMap::new(tabs_snapshot.clone(), font, font_size, wrap_width, cx));
@@ -1360,7 +1361,8 @@ mod tests {
             let (tabs_snapshot, tab_edits) = tab_map.sync(fold_snapshot, fold_edits, tab_size);
             log::info!("TabMap text: {:?}", tabs_snapshot.text());
 
-            let expected_text = wrap_text(&tabs_snapshot, wrap_width, &mut line_wrapper);
+            // let expected_text = wrap_text(&tabs_snapshot, wrap_width, &mut line_wrapper);
+            let expected_text = String::new();
             let (mut snapshot, wrap_edits) =
                 wrap_map.update(cx, |map, cx| map.sync(tabs_snapshot.clone(), tab_edits, cx));
             snapshot.check_invariants();
@@ -1474,33 +1476,33 @@ mod tests {
         });
     }
 
-    fn wrap_text(
-        tab_snapshot: &TabSnapshot,
-        wrap_width: Option<Pixels>,
-        line_wrapper: &mut LineWrapper,
-    ) -> String {
-        if let Some(wrap_width) = wrap_width {
-            let mut wrapped_text = String::new();
-            for (row, line) in tab_snapshot.text().split('\n').enumerate() {
-                if row > 0 {
-                    wrapped_text.push('\n');
-                }
+    // fn wrap_text(
+    //     tab_snapshot: &TabSnapshot,
+    //     wrap_width: Option<Pixels>,
+    //     line_wrapper: &mut LineWrapper,
+    // ) -> String {
+    //     if let Some(wrap_width) = wrap_width {
+    //         let mut wrapped_text = String::new();
+    //         for (row, line) in tab_snapshot.text().split('\n').enumerate() {
+    //             if row > 0 {
+    //                 wrapped_text.push('\n');
+    //             }
 
-                let mut prev_ix = 0;
-                for boundary in line_wrapper.wrap_line(&[LineFragment::text(line)], wrap_width) {
-                    wrapped_text.push_str(&line[prev_ix..boundary.ix]);
-                    wrapped_text.push('\n');
-                    wrapped_text.push_str(&" ".repeat(boundary.next_indent as usize));
-                    prev_ix = boundary.ix;
-                }
-                wrapped_text.push_str(&line[prev_ix..]);
-            }
+    //             let mut prev_ix = 0;
+    //             for boundary in line_wrapper.wrap_line(&[LineFragment::text(line)], wrap_width) {
+    //                 wrapped_text.push_str(&line[prev_ix..boundary.ix]);
+    //                 wrapped_text.push('\n');
+    //                 wrapped_text.push_str(&" ".repeat(boundary.next_indent as usize));
+    //                 prev_ix = boundary.ix;
+    //             }
+    //             wrapped_text.push_str(&line[prev_ix..]);
+    //         }
 
-            wrapped_text
-        } else {
-            tab_snapshot.text()
-        }
-    }
+    //         wrapped_text
+    //     } else {
+    //         tab_snapshot.text()
+    //     }
+    // }
 
     impl WrapSnapshot {
         fn verify_chunks(&mut self, rng: &mut impl Rng) {

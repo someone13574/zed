@@ -52,14 +52,16 @@ impl Assets {
             }
         }
 
-        cx.text_system().add_fonts(embedded_fonts)
+        Ok(())
+
+        // cx.text_system().add_fonts(embedded_fonts)
     }
 
     pub fn load_test_fonts(&self, cx: &App) {
-        cx.text_system()
-            .add_fonts(vec![
-                self.load("fonts/lilex/Lilex-Regular.ttf").unwrap().unwrap(),
-            ])
-            .unwrap()
+        // cx.text_system()
+        //     .add_fonts(vec![
+        //         self.load("fonts/lilex/Lilex-Regular.ttf").unwrap().unwrap(),
+        //     ])
+        //     .unwrap()
     }
 }

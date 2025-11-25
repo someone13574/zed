@@ -48,10 +48,10 @@ use gpui::{
     GlobalElementId, Hitbox, HitboxBehavior, Hsla, InteractiveElement, IntoElement, IsZero,
     KeybindingKeystroke, Length, Modifiers, ModifiersChangedEvent, MouseButton, MouseClickEvent,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, ParentElement, Pixels, ScrollDelta,
-    ScrollHandle, ScrollWheelEvent, ShapedLine, SharedString, Size, StatefulInteractiveElement,
-    Style, Styled, TextRun, TextStyleRefinement, WeakEntity, Window, anchored, deferred, div, fill,
-    linear_color_stop, linear_gradient, outline, point, px, quad, relative, size, solid_background,
-    transparent_black,
+    ScrollHandle, ScrollWheelEvent, ShapedLine, ShapedText, SharedString, Size,
+    StatefulInteractiveElement, Style, Styled, TextRun, TextStyleRefinement, WeakEntity, Window,
+    anchored, deferred, div, fill, linear_color_stop, linear_gradient, outline, point, px, quad,
+    relative, size, solid_background, transparent_black,
 };
 use itertools::Itertools;
 use language::{IndentGuideSettings, language_settings::ShowWhitespaceSetting};
@@ -1704,15 +1704,17 @@ impl EditorElement {
                                     cx.theme().colors().editor_background
                                 };
 
-                                window.text_system().shape_line(
+                                window.text_system().shape_text(
                                     text,
                                     cursor_row_layout.font_size,
+                                    line_height,
                                     &[TextRun {
                                         len,
                                         font,
                                         color,
                                         ..Default::default()
                                     }],
+                                    None,
                                     None,
                                 )
                             })
@@ -3305,7 +3307,9 @@ impl EditorElement {
             let line_origin = gutter_hitbox.map(|hitbox| {
                 hitbox.origin
                     + point(
-                        hitbox.size.width - shaped_line.width - gutter_dimensions.right_padding,
+                        hitbox.size.width
+                            - shaped_line.size().width
+                            - gutter_dimensions.right_padding,
                         ix as f32 * line_height
                             - Pixels::from(scroll_top % ScrollPixelOffset::from(line_height)),
                     )
@@ -3314,7 +3318,7 @@ impl EditorElement {
             #[cfg(not(test))]
             let hitbox = line_origin.map(|line_origin| {
                 window.insert_hitbox(
-                    Bounds::new(line_origin, size(shaped_line.width, line_height)),
+                    Bounds::new(line_origin, size(shaped_line.size().width, line_height)),
                     HitboxBehavior::Normal,
                 )
             });
@@ -3571,6 +3575,10 @@ impl EditorElement {
         // Show the placeholder when the editor is empty
         if snapshot.is_empty() {
             let font_size = style.text.font_size.to_pixels(window.rem_size());
+            let line_height = style
+                .text
+                .line_height
+                .to_pixels(font_size.into(), window.rem_size());
             let placeholder_color = cx.theme().colors().text_placeholder;
             let placeholder_text = snapshot.placeholder_text();
 
@@ -3592,15 +3600,17 @@ impl EditorElement {
                         color: placeholder_color,
                         ..Default::default()
                     };
-                    let line = window.text_system().shape_line(
+                    let line = window.text_system().shape_text(
                         line.to_string().into(),
                         font_size,
+                        line_height,
                         &[run],
+                        None,
                         None,
                     );
                     LineWithInvisibles {
-                        width: line.width,
-                        len: line.len,
+                        width: line.size().width,
+                        len: line.text.len(),
                         fragments: smallvec![LineFragment::Text(line)],
                         invisibles: Vec::new(),
                         font_size,
@@ -6099,18 +6109,14 @@ impl EditorElement {
                     continue;
                 };
 
-                let Some(()) = (if !is_singleton && hitbox.is_hovered(window) {
+                if !is_singleton && hitbox.is_hovered(window) {
                     let color = cx.theme().colors().editor_hover_line_number;
 
                     let line = self.shape_line_number(shaped_line.text.clone(), color, window);
-                    line.paint(hitbox.origin, line_height, window, cx).log_err()
+                    line.paint(hitbox.origin, window);
                 } else {
-                    shaped_line
-                        .paint(hitbox.origin, line_height, window, cx)
-                        .log_err()
-                }) else {
-                    continue;
-                };
+                    shaped_line.paint(hitbox.origin, window);
+                }
 
                 // In singleton buffers, we select corresponding lines on the line number click, so use | -like cursor.
                 // In multi buffers, we open file at the line number clicked, so use a pointing hand cursor.
@@ -6654,7 +6660,7 @@ impl EditorElement {
     ) {
         for (ix, line_with_invisibles) in layout.position_map.line_layouts.iter().enumerate() {
             let row = DisplayRow(layout.visible_display_row_range.start.0 + ix as u32);
-            line_with_invisibles.draw_background(layout, row, layout.content_origin, window, cx);
+            // line_with_invisibles.draw_background(layout, row, layout.content_origin, window, cx);
         }
     }
 
@@ -7703,9 +7709,14 @@ impl EditorElement {
     fn column_pixels(&self, column: usize, window: &Window) -> Pixels {
         let style = &self.style;
         let font_size = style.text.font_size.to_pixels(window.rem_size());
-        let layout = window.text_system().shape_line(
+        let line_height = style
+            .text
+            .line_height
+            .to_pixels(font_size.into(), window.rem_size());
+        let layout = window.text_system().shape_text(
             SharedString::from(" ".repeat(column)),
             font_size,
+            line_height,
             &[TextRun {
                 len: column,
                 font: style.text.font(),
@@ -7713,9 +7724,10 @@ impl EditorElement {
                 ..Default::default()
             }],
             None,
+            None,
         );
 
-        layout.width
+        layout.size().width
     }
 
     fn max_line_number_width(&self, snapshot: &EditorSnapshot, window: &mut Window) -> Pixels {
@@ -7728,17 +7740,23 @@ impl EditorElement {
         text: SharedString,
         color: Hsla,
         window: &mut Window,
-    ) -> ShapedLine {
+    ) -> ShapedText {
         let run = TextRun {
             len: text.len(),
             font: self.style.text.font(),
             color,
             ..Default::default()
         };
-        window.text_system().shape_line(
+        let font_size = self.style.text.font_size.to_pixels(window.rem_size());
+        window.text_system().shape_text(
             text,
-            self.style.text.font_size.to_pixels(window.rem_size()),
+            font_size,
+            self.style
+                .text
+                .line_height
+                .to_pixels(font_size.into(), window.rem_size()),
             &[run],
+            None,
             None,
         )
     }
@@ -8048,7 +8066,7 @@ pub(crate) struct LineWithInvisibles {
 }
 
 enum LineFragment {
-    Text(ShapedLine),
+    Text(ShapedText),
     Element {
         id: ChunkRendererId,
         element: Option<AnyElement>,
@@ -8095,6 +8113,9 @@ impl LineWithInvisibles {
         let mut row = 0;
         let mut line_exceeded_max_len = false;
         let font_size = text_style.font_size.to_pixels(window.rem_size());
+        let line_height = text_style
+            .line_height
+            .to_pixels(font_size.into(), window.rem_size());
         let min_contrast = EditorSettings::get_global(cx).minimum_contrast_for_highlights;
 
         let ellipsis = SharedString::from("⋯");
@@ -8114,14 +8135,16 @@ impl LineWithInvisibles {
                     } else {
                         &Self::split_runs_by_bg_segments(&styles, segments, min_contrast, len)
                     };
-                    let shaped_line = window.text_system().shape_line(
+                    let shaped_line = window.text_system().shape_text(
                         line.clone().into(),
                         font_size,
+                        line_height,
                         text_runs,
                         None,
+                        None,
                     );
-                    width += shaped_line.width;
-                    len += shaped_line.len;
+                    width += shaped_line.size().width;
+                    len += shaped_line.text.len();
                     fragments.push(LineFragment::Text(shaped_line));
                     line.clear();
                     styles.clear();
@@ -8135,13 +8158,15 @@ impl LineWithInvisibles {
                             } else {
                                 SharedString::from(Arc::from(highlighted_chunk.text))
                             };
-                            let shaped_line = window.text_system().shape_line(
+                            let shaped_line = window.text_system().shape_text(
                                 chunk,
                                 font_size,
+                                line_height,
                                 &[text_style.to_run(highlighted_chunk.text.len())],
                                 None,
+                                None,
                             );
-                            AvailableSpace::Definite(shaped_line.width)
+                            AvailableSpace::Definite(shaped_line.size().width)
                         } else {
                             AvailableSpace::MinContent
                         };
@@ -8184,10 +8209,10 @@ impl LineWithInvisibles {
                         };
                         let line_layout = window
                             .text_system()
-                            .shape_line(x, font_size, &[run], None)
+                            .shape_text(x, font_size, line_height, &[run], None, None)
                             .with_len(highlighted_chunk.text.len());
 
-                        width += line_layout.width;
+                        width += line_layout.size().width;
                         len += highlighted_chunk.text.len();
                         fragments.push(LineFragment::Text(line_layout))
                     }
@@ -8201,14 +8226,16 @@ impl LineWithInvisibles {
                         } else {
                             &Self::split_runs_by_bg_segments(&styles, segments, min_contrast, len)
                         };
-                        let shaped_line = window.text_system().shape_line(
+                        let shaped_line = window.text_system().shape_text(
                             line.clone().into(),
                             font_size,
+                            line_height,
                             text_runs,
                             None,
+                            None,
                         );
-                        width += shaped_line.width;
-                        len += shaped_line.len;
+                        width += shaped_line.size().width;
+                        len += shaped_line.text.len();
                         fragments.push(LineFragment::Text(shaped_line));
                         layouts.push(Self {
                             width: mem::take(&mut width),
@@ -8406,7 +8433,7 @@ impl LineWithInvisibles {
         for fragment in &mut self.fragments {
             match fragment {
                 LineFragment::Text(line) => {
-                    fragment_origin.x += line.width;
+                    fragment_origin.x += line.size().width;
                 }
                 LineFragment::Element { element, size, .. } => {
                     let mut element = element
@@ -8469,9 +8496,8 @@ impl LineWithInvisibles {
         for fragment in &self.fragments {
             match fragment {
                 LineFragment::Text(line) => {
-                    line.paint(fragment_origin, line_height, window, cx)
-                        .log_err();
-                    fragment_origin.x += line.width;
+                    line.paint(fragment_origin, window);
+                    fragment_origin.x += line.size().width;
                 }
                 LineFragment::Element { size, .. } => {
                     fragment_origin.x += size.width;
@@ -8492,36 +8518,36 @@ impl LineWithInvisibles {
         );
     }
 
-    fn draw_background(
-        &self,
-        layout: &EditorLayout,
-        row: DisplayRow,
-        content_origin: gpui::Point<Pixels>,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        let line_height = layout.position_map.line_height;
-        let line_y = line_height * (row.as_f64() - layout.position_map.scroll_position.y) as f32;
+    // fn draw_background(
+    //     &self,
+    //     layout: &EditorLayout,
+    //     row: DisplayRow,
+    //     content_origin: gpui::Point<Pixels>,
+    //     window: &mut Window,
+    //     cx: &mut App,
+    // ) {
+    //     let line_height = layout.position_map.line_height;
+    //     let line_y = line_height * (row.as_f64() - layout.position_map.scroll_position.y) as f32;
 
-        let mut fragment_origin = content_origin
-            + gpui::point(
-                Pixels::from(-layout.position_map.scroll_pixel_position.x),
-                line_y,
-            );
+    //     let mut fragment_origin = content_origin
+    //         + gpui::point(
+    //             Pixels::from(-layout.position_map.scroll_pixel_position.x),
+    //             line_y,
+    //         );
 
-        for fragment in &self.fragments {
-            match fragment {
-                LineFragment::Text(line) => {
-                    line.paint_background(fragment_origin, line_height, window, cx)
-                        .log_err();
-                    fragment_origin.x += line.width;
-                }
-                LineFragment::Element { size, .. } => {
-                    fragment_origin.x += size.width;
-                }
-            }
-        }
-    }
+    //     for fragment in &self.fragments {
+    //         match fragment {
+    //             LineFragment::Text(line) => {
+    //                 line.paint_background(fragment_origin, line_height, window, cx)
+    //                     .log_err();
+    //                 fragment_origin.x += line.width;
+    //             }
+    //             LineFragment::Element { size, .. } => {
+    //                 fragment_origin.x += size.width;
+    //             }
+    //         }
+    //     }
+    // }
 
     fn draw_invisibles(
         &self,
@@ -8548,7 +8574,8 @@ impl LineWithInvisibles {
 
             let x_offset: ScrollPixelOffset = self.x_for_index(token_offset).into();
             let invisible_offset: ScrollPixelOffset =
-                ((layout.position_map.em_width - invisible_symbol.width).max(Pixels::ZERO) / 2.0)
+                ((layout.position_map.em_width - invisible_symbol.size().width).max(Pixels::ZERO)
+                    / 2.0)
                     .into();
             let origin = content_origin
                 + gpui::point(
@@ -8561,9 +8588,7 @@ impl LineWithInvisibles {
             (
                 [token_offset, token_end_offset],
                 Box::new(move |window: &mut Window, cx: &mut App| {
-                    invisible_symbol
-                        .paint(origin, line_height, window, cx)
-                        .log_err();
+                    invisible_symbol.paint(origin, window);
                 }),
             )
         };
@@ -8647,12 +8672,14 @@ impl LineWithInvisibles {
         for fragment in &self.fragments {
             match fragment {
                 LineFragment::Text(shaped_line) => {
-                    let fragment_end_index = fragment_start_index + shaped_line.len;
+                    let fragment_end_index = fragment_start_index + shaped_line.text.len();
                     if index < fragment_end_index {
                         return fragment_start_x
-                            + shaped_line.x_for_index(index - fragment_start_index);
+                            + shaped_line
+                                .position_for_index(index - fragment_start_index)
+                                .x;
                     }
-                    fragment_start_x += shaped_line.width;
+                    fragment_start_x += shaped_line.size().width;
                     fragment_start_index = fragment_end_index;
                 }
                 LineFragment::Element { len, size, .. } => {
@@ -8676,14 +8703,16 @@ impl LineWithInvisibles {
         for fragment in &self.fragments {
             match fragment {
                 LineFragment::Text(shaped_line) => {
-                    let fragment_end_x = fragment_start_x + shaped_line.width;
+                    let fragment_end_x = fragment_start_x + shaped_line.size().width;
                     if x < fragment_end_x {
                         return Some(
-                            fragment_start_index + shaped_line.index_for_x(x - fragment_start_x)?,
+                            fragment_start_index
+                                + shaped_line
+                                    .index_for_position(point(x - fragment_start_x, px(0.0)))?,
                         );
                     }
                     fragment_start_x = fragment_end_x;
-                    fragment_start_index += shaped_line.len;
+                    fragment_start_index += shaped_line.text.len();
                 }
                 LineFragment::Element { len, size, .. } => {
                     let fragment_end_x = fragment_start_x + size.width;
@@ -8705,7 +8734,7 @@ impl LineWithInvisibles {
         for fragment in &self.fragments {
             match fragment {
                 LineFragment::Text(shaped_line) => {
-                    let fragment_end_index = fragment_start_index + shaped_line.len;
+                    let fragment_end_index = fragment_start_index + shaped_line.text.len();
                     if index < fragment_end_index {
                         return shaped_line.font_id_for_index(index - fragment_start_index);
                     }
@@ -10020,30 +10049,31 @@ impl Element for EditorElement {
 
                     let tab_char = whitespace_map.tab.clone();
                     let tab_len = tab_char.len();
-                    let tab_invisible = window.text_system().shape_line(
+                    let tab_invisible = window.text_system().shape_text(
                         tab_char,
                         invisible_symbol_font_size,
+                        line_height,
                         &[TextRun {
                             len: tab_len,
                             font: self.style.text.font(),
                             color: cx.theme().colors().editor_invisible,
                             ..Default::default()
                         }],
-                        None,
+                        None,None,
                     );
 
                     let space_char = whitespace_map.space.clone();
                     let space_len = space_char.len();
-                    let space_invisible = window.text_system().shape_line(
+                    let space_invisible = window.text_system().shape_text(
                         space_char,
-                        invisible_symbol_font_size,
+                        invisible_symbol_font_size,line_height,
                         &[TextRun {
                             len: space_len,
                             font: self.style.text.font(),
                             color: cx.theme().colors().editor_invisible,
                             ..Default::default()
                         }],
-                        None,
+                        None,None
                     );
 
                     let mode = snapshot.mode.clone();
@@ -10306,8 +10336,8 @@ pub struct EditorLayout {
     crease_trailers: Vec<Option<CreaseTrailerLayout>>,
     edit_prediction_popover: Option<AnyElement>,
     mouse_context_menu: Option<AnyElement>,
-    tab_invisible: ShapedLine,
-    space_invisible: ShapedLine,
+    tab_invisible: ShapedText,
+    space_invisible: ShapedText,
     sticky_buffer_header: Option<AnyElement>,
     sticky_headers: Option<StickyHeaders>,
     document_colors: Option<(DocumentColorsRenderMode, Vec<(Range<DisplayPoint>, Hsla)>)>,
@@ -10324,7 +10354,7 @@ struct StickyHeaderLine {
     row: DisplayRow,
     offset: Pixels,
     line: LineWithInvisibles,
-    line_number: Option<ShapedLine>,
+    line_number: Option<ShapedText>,
     elements: SmallVec<[AnyElement; 1]>,
     available_text_width: Pixels,
     target_anchor: Anchor,
@@ -10395,7 +10425,7 @@ impl StickyHeaderLine {
         row: DisplayRow,
         offset: Pixels,
         mut line: LineWithInvisibles,
-        line_number: Option<ShapedLine>,
+        line_number: Option<ShapedText>,
         target_anchor: Anchor,
         line_height: Pixels,
         scroll_pixel_position: gpui::Point<ScrollPixelOffset>,
@@ -10475,17 +10505,17 @@ impl StickyHeaderLine {
             let gutter_origin = layout.gutter_hitbox.origin + point(Pixels::ZERO, self.offset);
             let gutter_width = layout.gutter_hitbox.size.width;
             let origin = point(
-                gutter_origin.x + gutter_width - gutter_right_padding - line_number.width,
+                gutter_origin.x + gutter_width - gutter_right_padding - line_number.size().width,
                 gutter_origin.y,
             );
-            line_number.paint(origin, line_height, window, cx).log_err();
+            line_number.paint(origin, window);
         }
     }
 }
 
 #[derive(Debug)]
 struct LineNumberSegment {
-    shaped_line: ShapedLine,
+    shaped_line: ShapedText,
     hitbox: Option<Hitbox>,
 }
 
@@ -11059,7 +11089,7 @@ pub struct CursorLayout {
     line_height: Pixels,
     color: Hsla,
     shape: CursorShape,
-    block_text: Option<ShapedLine>,
+    block_text: Option<ShapedText>,
     cursor_name: Option<AnyElement>,
 }
 
@@ -11077,7 +11107,7 @@ impl CursorLayout {
         line_height: Pixels,
         color: Hsla,
         shape: CursorShape,
-        block_text: Option<ShapedLine>,
+        block_text: Option<ShapedText>,
     ) -> CursorLayout {
         CursorLayout {
             origin,
@@ -11173,9 +11203,7 @@ impl CursorLayout {
         window.paint_quad(cursor);
 
         if let Some(block_text) = &self.block_text {
-            block_text
-                .paint(self.origin + origin, self.line_height, window, cx)
-                .log_err();
+            block_text.paint(self.origin + origin, window);
         }
     }
 

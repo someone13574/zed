@@ -163,6 +163,8 @@ impl TextSystem {
     ///
     /// Panics if the font and none of the fallbacks can be resolved.
     pub fn resolve_font(&self, _font: &Font) -> FontId {
+        // parley::
+
         todo!()
         // if let Ok(font_id) = self.font_id(font) {
         //     return font_id;
@@ -657,6 +659,7 @@ impl Default for Brush {
 }
 
 /// Text which has been shaped and laid-out
+#[derive(Clone)]
 pub struct ShapedText {
     layout: Layout<Brush>,
     /// The text that was shaped
@@ -683,6 +686,11 @@ impl ShapedText {
                 align_when_overflowing: true,
             },
         );
+    }
+
+    /// TODO_parly ref https://github.com/zed-industries/zed/pull/20841
+    pub fn with_len(&self, len: usize) -> Self {
+        self.clone()
     }
 
     /// The utf8 byte-index for the character at the given coordinates
@@ -782,6 +790,28 @@ impl ShapedText {
         point(last, self.layout.height().into())
     }
 
+    /// Something
+    pub fn font_id_for_index(&self, index: usize) -> Option<FontId> {
+        for line in self.layout.lines() {
+            for item in line.items() {
+                let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
+                    continue;
+                };
+
+                for cluster in glyph_run.run().clusters() {
+                    if cluster.text_range().contains(&index) {
+                        return Some(FontId(
+                            glyph_run.run().font().data.id(),
+                            glyph_run.run().font().index,
+                        ));
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
     /// Paints the text to the window
     pub fn paint(&self, origin: Point<Pixels>, window: &mut Window) {
         let bounds = Bounds::new(
@@ -860,6 +890,14 @@ impl ShapedText {
                 }
             }
         });
+    }
+}
+
+impl Debug for ShapedText {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ShapedText")
+            .field("text", &self.text)
+            .finish()
     }
 }
 
