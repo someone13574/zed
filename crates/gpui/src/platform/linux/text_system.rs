@@ -20,14 +20,14 @@ use swash::{
 
 pub(crate) struct CosmicTextSystem(RwLock<CosmicTextSystemState>);
 
-pub struct Font {
+struct LoadedFont {
     data: Blob<u8>,
     offset: u32,
     key: CacheKey,
 }
 
 struct CosmicTextSystemState {
-    font_cache: HashMap<FontId, Font>,
+    font_cache: HashMap<FontId, LoadedFont>,
     scale_ctx: ScaleContext,
     // _swash_cache: SwashCache,
     // font_system: FontSystem,
@@ -77,7 +77,7 @@ impl PlatformTextSystem for CosmicTextSystem {
             let font_ref = FontRef::from_index(font.data.data(), font.index as usize).unwrap();
             cache.insert(
                 id,
-                Font {
+                LoadedFont {
                     data: font.data.clone(),
                     offset: font_ref.offset,
                     key: font_ref.key,

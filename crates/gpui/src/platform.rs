@@ -37,11 +37,10 @@ pub(crate) mod scap_screen_capture;
 
 use crate::{
     Action, AnyWindowHandle, App, AsyncWindowContext, BackgroundExecutor, Bounds,
-    DEFAULT_WINDOW_SIZE, DevicePixels, DispatchEventResult, Font, FontId, FontMetrics, FontRun,
-    ForegroundExecutor, GlyphId, GpuSpecs, ImageSource, Keymap, LineLayout, Pixels, PlatformInput,
-    Point, RenderGlyphParams, RenderImage, RenderImageParams, RenderSvgParams, Scene, ShapedGlyph,
-    ShapedRun, SharedString, Size, SvgRenderer, SystemWindowTab, Task, TaskLabel, TaskTiming,
-    ThreadTaskTimings, Window, WindowControlArea, hash, point, px, size,
+    DEFAULT_WINDOW_SIZE, DevicePixels, DispatchEventResult, ForegroundExecutor, GpuSpecs,
+    ImageSource, Keymap, Pixels, PlatformInput, Point, RenderGlyphParams, RenderImage,
+    RenderImageParams, RenderSvgParams, Scene, SharedString, Size, SvgRenderer, SystemWindowTab,
+    Task, TaskLabel, TaskTiming, ThreadTaskTimings, Window, WindowControlArea, hash, point,
 };
 use anyhow::Result;
 use async_task::Runnable;
@@ -49,7 +48,6 @@ use futures::channel::oneshot;
 use image::codecs::gif::GifDecoder;
 use image::{AnimationDecoder as _, Frame};
 use parley::FontData;
-use parley::fontique::Blob;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use schemars::JsonSchema;
 use seahash::SeaHasher;

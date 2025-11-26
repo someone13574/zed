@@ -1,10 +1,9 @@
 use crate::{
-    ActiveTooltip, AnyView, App, Bounds, DispatchPhase, Element, ElementId, FontId,
-    GlobalElementId, GlyphId, HighlightStyle, Hitbox, HitboxBehavior, Hsla, InspectorElementId,
-    IntoElement, LayoutId, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ShapedText,
-    SharedString, Size, StrikethroughStyle, TextOverflow, TextRun, TextStyle, TooltipId,
-    UnderlineStyle, WhiteSpace, Window, WrappedLineLayout, point, px,
-    register_tooltip_mouse_handlers, set_tooltip_on_window, size,
+    ActiveTooltip, AnyView, App, Bounds, DispatchPhase, Element, ElementId, GlobalElementId,
+    HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ShapedText, SharedString, Size,
+    TextOverflow, TextRun, TextStyle, TooltipId, WhiteSpace, Window,
+    register_tooltip_mouse_handlers, set_tooltip_on_window,
 };
 use anyhow::Context as _;
 use std::{
@@ -556,38 +555,38 @@ impl TextLayout {
         // None
     }
 
-    /// Retrieve the layout for the line containing the given byte index.
-    pub fn line_layout_for_index(&self, index: usize) -> Option<Arc<WrappedLineLayout>> {
-        todo!()
-        // let element_state = self.0.borrow();
-        // let element_state = element_state
-        //     .as_ref()
-        //     .expect("measurement has not been performed");
-        // let bounds = element_state
-        //     .bounds
-        //     .expect("prepaint has not been performed");
-        // let line_height = element_state.line_height;
+    // /// Retrieve the layout for the line containing the given byte index.
+    // pub fn line_layout_for_index(&self, index: usize) -> Option<Arc<WrappedLineLayout>> {
+    //     todo!()
+    //     // let element_state = self.0.borrow();
+    //     // let element_state = element_state
+    //     //     .as_ref()
+    //     //     .expect("measurement has not been performed");
+    //     // let bounds = element_state
+    //     //     .bounds
+    //     //     .expect("prepaint has not been performed");
+    //     // let line_height = element_state.line_height;
 
-        // let mut line_origin = bounds.origin;
-        // let mut line_start_ix = 0;
+    //     // let mut line_origin = bounds.origin;
+    //     // let mut line_start_ix = 0;
 
-        // for line in &element_state.lines {
-        //     let line_end_ix = line_start_ix + line.len();
-        //     if index < line_start_ix {
-        //         break;
-        //     } else if index > line_end_ix {
-        //         todo!();
-        //         // line_origin.y += line.line().metrics().line_height;
-        //         line_start_ix = line_end_ix + 1;
-        //         continue;
-        //     } else {
-        //         todo!();
-        //         // return Some(line.layout.clone());
-        //     }
-        // }
+    //     // for line in &element_state.lines {
+    //     //     let line_end_ix = line_start_ix + line.len();
+    //     //     if index < line_start_ix {
+    //     //         break;
+    //     //     } else if index > line_end_ix {
+    //     //         todo!();
+    //     //         // line_origin.y += line.line().metrics().line_height;
+    //     //         line_start_ix = line_end_ix + 1;
+    //     //         continue;
+    //     //     } else {
+    //     //         todo!();
+    //     //         // return Some(line.layout.clone());
+    //     //     }
+    //     // }
 
-        // None
-    }
+    //     // None
+    // }
 
     /// The bounds of this layout.
     pub fn bounds(&self) -> Bounds<Pixels> {

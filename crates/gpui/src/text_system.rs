@@ -7,39 +7,26 @@ mod line_wrapper;
 use collections::FxHashMap;
 pub use font_fallbacks::*;
 pub use font_features::*;
-use image::imageops::FilterType::Lanczos3;
-use itertools::Itertools;
-pub use line::*;
-pub use line_layout::*;
-pub use line_wrapper::*;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use parley::{
     Alignment, AlignmentOptions, FontContext, FontData, FontFamily, FontStack, FontWidth,
     GenericFamily, Layout, LayoutContext, LineHeight, PositionedLayoutItem, StyleProperty,
-    fontique::{Attributes, FallbackKey, QueryFamily, QueryStatus, SourceCache, SourceInfo},
+    fontique::{Attributes, QueryFamily, QueryStatus},
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use swash::{FontRef, Metrics, proxy::MetricsProxy};
+use swash::{FontRef, Metrics};
 
 use crate::{
-    App, Bounds, DefiniteLength, DevicePixels, Hsla, Pixels, PlatformTextSystem, Point, Result,
-    SharedString, Size, StrikethroughStyle, TextAlign, UnderlineStyle, Window, bounds, fill, point,
-    px, size,
+    Bounds, DevicePixels, Hsla, Pixels, PlatformTextSystem, Point, Result, SharedString, Size,
+    StrikethroughStyle, TextAlign, UnderlineStyle, Window, bounds, fill, point, px, size,
 };
-// use anyhow::{Context as _, anyhow};
-// use collections::FxHashMap;
 use core::fmt;
 use derive_more::{Add, Deref, FromStr, Sub};
-// use itertools::Itertools;
-// use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
-use smallvec::SmallVec;
 use std::{
     borrow::Cow,
-    // cmp,
     fmt::{Debug, Display, Formatter},
     hash::{Hash, Hasher},
-    ops::{Deref, DerefMut},
     sync::Arc,
 };
 
@@ -239,8 +226,12 @@ impl TextSystem {
     /// Get the bounding box for the given font and font size.
     /// A font's bounding box is the smallest rectangle that could enclose all glyphs
     /// in the font. superimposed over one another.
-    pub fn bounding_box(&self, _font_id: FontId, _font_size: Pixels) -> Bounds<Pixels> {
-        todo!()
+    pub fn bounding_box(&self, font_id: FontId, font_size: Pixels) -> Bounds<Pixels> {
+        let metrics = self.font_metrics(font_id, font_size); // TODO_parley: do this correctly (need to make swash expose bbox)
+        bounds(
+            point(px(0.0), px(0.0)),
+            size(px(metrics.max_width), px(metrics.ascent + metrics.descent)),
+        )
         // self.read_metrics(font_id, |metrics| metrics.bounding_box(font_size))
     }
 
@@ -394,24 +385,23 @@ impl TextSystem {
     //     }
     // }
 
-    /// Returns a handle to a line wrapper, for the given font and font size.
-    #[deprecated]
-    pub fn line_wrapper(self: &Arc<Self>, _font: Font, _font_size: Pixels) -> LineWrapperHandle {
-        todo!()
-        // let lock = &mut self.wrapper_pool.lock();
-        // let font_id = self.resolve_font(&font);
-        // let wrappers = lock
-        //     .entry(FontIdWithSize { font_id, font_size })
-        //     .or_default();
-        // let wrapper = wrappers.pop().unwrap_or_else(|| {
-        //     LineWrapper::new(font_id, font_size, self.platform_text_system.clone())
-        // });
+    // /// Returns a handle to a line wrapper, for the given font and font size.
+    // pub fn line_wrapper(self: &Arc<Self>, _font: Font, _font_size: Pixels) -> LineWrapperHandle {
+    //     todo!()
+    //     // let lock = &mut self.wrapper_pool.lock();
+    //     // let font_id = self.resolve_font(&font);
+    //     // let wrappers = lock
+    //     //     .entry(FontIdWithSize { font_id, font_size })
+    //     //     .or_default();
+    //     // let wrapper = wrappers.pop().unwrap_or_else(|| {
+    //     //     LineWrapper::new(font_id, font_size, self.platform_text_system.clone())
+    //     // });
 
-        // LineWrapperHandle {
-        //     wrapper: Some(wrapper),
-        //     text_system: self.clone(),
-        // }
-    }
+    //     // LineWrapperHandle {
+    //     //     wrapper: Some(wrapper),
+    //     //     text_system: self.clone(),
+    //     // }
+    // }
 
     /// Get the rasterized size and location of a specific, rendered glyph.
     pub(crate) fn raster_bounds(&self, params: &RenderGlyphParams) -> Result<Bounds<DevicePixels>> {
@@ -485,7 +475,7 @@ impl WindowTextSystem {
         let mut builder = layout_ctx.ranged_builder(&mut font_ctx, &text, 1.0, true);
         builder.push_default(StyleProperty::FontSize(font_size.0));
         builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(
-            line_height.0, // TODO_parley: allow metric here
+            line_height.0, // TODO_parley: allow metrics here
         )));
 
         let mut offset = 0;
@@ -987,40 +977,40 @@ impl Debug for ShapedText {
 //     font_size: Pixels,
 // }
 
-/// A handle into the text system, which can be used to compute the wrapped layout of text
-pub struct LineWrapperHandle {
-    wrapper: Option<LineWrapper>,
-    _text_system: Arc<TextSystem>,
-}
+// /// A handle into the text system, which can be used to compute the wrapped layout of text
+// pub struct LineWrapperHandle {
+//     wrapper: Option<LineWrapper>,
+//     _text_system: Arc<TextSystem>,
+// }
 
-impl Drop for LineWrapperHandle {
-    fn drop(&mut self) {
-        todo!()
-        // let mut state = self.text_system.wrapper_pool.lock();
-        // let wrapper = self.wrapper.take().unwrap();
-        // state
-        //     .get_mut(&FontIdWithSize {
-        //         font_id: wrapper.font_id,
-        //         font_size: wrapper.font_size,
-        //     })
-        //     .unwrap()
-        //     .push(wrapper);
-    }
-}
+// impl Drop for LineWrapperHandle {
+//     fn drop(&mut self) {
+//         todo!()
+//         // let mut state = self.text_system.wrapper_pool.lock();
+//         // let wrapper = self.wrapper.take().unwrap();
+//         // state
+//         //     .get_mut(&FontIdWithSize {
+//         //         font_id: wrapper.font_id,
+//         //         font_size: wrapper.font_size,
+//         //     })
+//         //     .unwrap()
+//         //     .push(wrapper);
+//     }
+// }
 
-impl Deref for LineWrapperHandle {
-    type Target = LineWrapper;
+// impl Deref for LineWrapperHandle {
+//     type Target = LineWrapper;
 
-    fn deref(&self) -> &Self::Target {
-        self.wrapper.as_ref().unwrap()
-    }
-}
+//     fn deref(&self) -> &Self::Target {
+//         self.wrapper.as_ref().unwrap()
+//     }
+// }
 
-impl DerefMut for LineWrapperHandle {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.wrapper.as_mut().unwrap()
-    }
-}
+// impl DerefMut for LineWrapperHandle {
+//     fn deref_mut(&mut self) -> &mut Self::Target {
+//         self.wrapper.as_mut().unwrap()
+//     }
+// }
 
 /// The degree of blackness or stroke thickness of a font. This value ranges from 100.0 to 900.0,
 /// with 400.0 as normal.
@@ -1230,81 +1220,81 @@ impl Font {
     }
 }
 
-/// A struct for storing font metrics.
-/// It is used to define the measurements of a typeface.
-#[derive(Clone, Copy, Debug)]
-pub struct FontMetrics {
-    /// The number of font units that make up the "em square",
-    /// a scalable grid for determining the size of a typeface.
-    pub(crate) units_per_em: u32,
+// /// A struct for storing font metrics.
+// /// It is used to define the measurements of a typeface.
+// #[derive(Clone, Copy, Debug)]
+// pub struct FontMetrics {
+//     /// The number of font units that make up the "em square",
+//     /// a scalable grid for determining the size of a typeface.
+//     pub(crate) units_per_em: u32,
 
-    /// The vertical distance from the baseline of the font to the top of the glyph covers.
-    pub(crate) ascent: f32,
+//     /// The vertical distance from the baseline of the font to the top of the glyph covers.
+//     pub(crate) ascent: f32,
 
-    /// The vertical distance from the baseline of the font to the bottom of the glyph covers.
-    pub(crate) descent: f32,
+//     /// The vertical distance from the baseline of the font to the bottom of the glyph covers.
+//     pub(crate) descent: f32,
 
-    /// The recommended additional space to add between lines of type.
-    pub(crate) line_gap: f32,
+//     /// The recommended additional space to add between lines of type.
+//     pub(crate) line_gap: f32,
 
-    /// The suggested position of the underline.
-    pub(crate) underline_position: f32,
+//     /// The suggested position of the underline.
+//     pub(crate) underline_position: f32,
 
-    /// The suggested thickness of the underline.
-    pub(crate) underline_thickness: f32,
+//     /// The suggested thickness of the underline.
+//     pub(crate) underline_thickness: f32,
 
-    /// The height of a capital letter measured from the baseline of the font.
-    pub(crate) cap_height: f32,
+//     /// The height of a capital letter measured from the baseline of the font.
+//     pub(crate) cap_height: f32,
 
-    /// The height of a lowercase x.
-    pub(crate) x_height: f32,
+//     /// The height of a lowercase x.
+//     pub(crate) x_height: f32,
 
-    /// The outer limits of the area that the font covers.
-    /// Corresponds to the xMin / xMax / yMin / yMax values in the OpenType `head` table
-    pub(crate) bounding_box: Bounds<f32>,
-}
+//     /// The outer limits of the area that the font covers.
+//     /// Corresponds to the xMin / xMax / yMin / yMax values in the OpenType `head` table
+//     pub(crate) bounding_box: Bounds<f32>,
+// }
 
-impl FontMetrics {
-    /// Returns the vertical distance from the baseline of the font to the top of the glyph covers in pixels.
-    pub fn ascent(&self, font_size: Pixels) -> Pixels {
-        Pixels((self.ascent / self.units_per_em as f32) * font_size.0)
-    }
+// impl FontMetrics {
+//     /// Returns the vertical distance from the baseline of the font to the top of the glyph covers in pixels.
+//     pub fn ascent(&self, font_size: Pixels) -> Pixels {
+//         Pixels((self.ascent / self.units_per_em as f32) * font_size.0)
+//     }
 
-    /// Returns the vertical distance from the baseline of the font to the bottom of the glyph covers in pixels.
-    pub fn descent(&self, font_size: Pixels) -> Pixels {
-        Pixels((self.descent / self.units_per_em as f32) * font_size.0)
-    }
+//     /// Returns the vertical distance from the baseline of the font to the bottom of the glyph covers in pixels.
+//     pub fn descent(&self, font_size: Pixels) -> Pixels {
+//         Pixels((self.descent / self.units_per_em as f32) * font_size.0)
+//     }
 
-    /// Returns the recommended additional space to add between lines of type in pixels.
-    pub fn line_gap(&self, font_size: Pixels) -> Pixels {
-        Pixels((self.line_gap / self.units_per_em as f32) * font_size.0)
-    }
+//     /// Returns the recommended additional space to add between lines of type in pixels.
+//     pub fn line_gap(&self, font_size: Pixels) -> Pixels {
+//         Pixels((self.line_gap / self.units_per_em as f32) * font_size.0)
+//     }
 
-    /// Returns the suggested position of the underline in pixels.
-    pub fn underline_position(&self, font_size: Pixels) -> Pixels {
-        Pixels((self.underline_position / self.units_per_em as f32) * font_size.0)
-    }
+//     /// Returns the suggested position of the underline in pixels.
+//     pub fn underline_position(&self, font_size: Pixels) -> Pixels {
+//         Pixels((self.underline_position / self.units_per_em as f32) * font_size.0)
+//     }
 
-    /// Returns the suggested thickness of the underline in pixels.
-    pub fn underline_thickness(&self, font_size: Pixels) -> Pixels {
-        Pixels((self.underline_thickness / self.units_per_em as f32) * font_size.0)
-    }
+//     /// Returns the suggested thickness of the underline in pixels.
+//     pub fn underline_thickness(&self, font_size: Pixels) -> Pixels {
+//         Pixels((self.underline_thickness / self.units_per_em as f32) * font_size.0)
+//     }
 
-    /// Returns the height of a capital letter measured from the baseline of the font in pixels.
-    pub fn cap_height(&self, font_size: Pixels) -> Pixels {
-        Pixels((self.cap_height / self.units_per_em as f32) * font_size.0)
-    }
+//     /// Returns the height of a capital letter measured from the baseline of the font in pixels.
+//     pub fn cap_height(&self, font_size: Pixels) -> Pixels {
+//         Pixels((self.cap_height / self.units_per_em as f32) * font_size.0)
+//     }
 
-    /// Returns the height of a lowercase x in pixels.
-    pub fn x_height(&self, font_size: Pixels) -> Pixels {
-        Pixels((self.x_height / self.units_per_em as f32) * font_size.0)
-    }
+//     /// Returns the height of a lowercase x in pixels.
+//     pub fn x_height(&self, font_size: Pixels) -> Pixels {
+//         Pixels((self.x_height / self.units_per_em as f32) * font_size.0)
+//     }
 
-    /// Returns the outer limits of the area that the font covers in pixels.
-    pub fn bounding_box(&self, font_size: Pixels) -> Bounds<Pixels> {
-        (self.bounding_box / self.units_per_em as f32 * font_size.0).map(px)
-    }
-}
+//     /// Returns the outer limits of the area that the font covers in pixels.
+//     pub fn bounding_box(&self, font_size: Pixels) -> Bounds<Pixels> {
+//         (self.bounding_box / self.units_per_em as f32 * font_size.0).map(px)
+//     }
+// }
 
 #[allow(unused)]
 pub(crate) fn font_name_with_fallbacks<'a>(name: &'a str, system: &'a str) -> &'a str {

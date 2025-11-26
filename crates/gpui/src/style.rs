@@ -12,7 +12,6 @@ use crate::{
     point, quad, rems, size,
 };
 use collections::HashSet;
-pub use parley::Alignment;
 use refineable::Refineable;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
