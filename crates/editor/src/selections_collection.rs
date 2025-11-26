@@ -372,7 +372,8 @@ impl SelectionsCollection {
         let is_empty = positions.start == positions.end;
         let line_len = display_map.line_len(row);
         let line = display_map.layout_row(row, text_layout_details);
-        let start_col = line.closest_index_for_x(positions.start) as u32;
+        let start_col =
+            line.closest_index_for_position(gpui::point(positions.start, 0.0.into())) as u32;
 
         let (start, end) = if is_empty {
             let point = DisplayPoint::new(row, std::cmp::min(start_col, line_len));
@@ -382,7 +383,8 @@ impl SelectionsCollection {
                 return None;
             }
             let start = DisplayPoint::new(row, start_col);
-            let end_col = line.closest_index_for_x(positions.end) as u32;
+            let end_col =
+                line.closest_index_for_position(gpui::point(positions.end, 0.0.into())) as u32;
             let end = DisplayPoint::new(row, end_col);
             (start, end)
         };

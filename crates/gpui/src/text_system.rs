@@ -14,16 +14,18 @@ pub use line_layout::*;
 pub use line_wrapper::*;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use parley::{
-    Alignment, AlignmentOptions, FontContext, FontData, Layout, LayoutContext, LineHeight,
-    PositionedLayoutItem, StyleProperty,
+    Alignment, AlignmentOptions, FontContext, FontData, FontFamily, FontStack, FontWidth,
+    GenericFamily, Layout, LayoutContext, LineHeight, PositionedLayoutItem, StyleProperty,
+    fontique::{Attributes, FallbackKey, QueryFamily, QueryStatus, SourceCache, SourceInfo},
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use swash::{FontRef, Metrics, proxy::MetricsProxy};
 
 use crate::{
     App, Bounds, DefiniteLength, DevicePixels, Hsla, Pixels, PlatformTextSystem, Point, Result,
-    SharedString, Size, StrikethroughStyle, TextAlign, UnderlineStyle, Window, fill, point, px,
-    size,
+    SharedString, Size, StrikethroughStyle, TextAlign, UnderlineStyle, Window, bounds, fill, point,
+    px, size,
 };
 // use anyhow::{Context as _, anyhow};
 // use collections::FxHashMap;
@@ -64,8 +66,10 @@ pub struct TextSystem {
     platform_text_system: Arc<dyn PlatformTextSystem>,
     font_ctx: Mutex<FontContext>,
     layout_ctx: Mutex<LayoutContext<Brush>>,
+    resolved_fonts: RwLock<FxHashMap<FontId, FontData>>,
     // font_ids_by_font: RwLock<FxHashMap<Font, Result<FontId>>>,
     // font_metrics: RwLock<FxHashMap<FontId, FontMetrics>>,
+    font_metrics: RwLock<FxHashMap<FontId, Metrics>>,
     raster_bounds: RwLock<FxHashMap<RenderGlyphParams, Bounds<DevicePixels>>>,
     // wrapper_pool: Mutex<FxHashMap<FontIdWithSize, Vec<LineWrapper>>>,
     // font_runs_pool: Mutex<Vec<Vec<FontRun>>>,
@@ -78,7 +82,8 @@ impl TextSystem {
             platform_text_system: platform_text_system,
             font_ctx: Mutex::default(),
             layout_ctx: Mutex::default(),
-            // font_metrics: RwLock::default(),
+            resolved_fonts: RwLock::default(),
+            font_metrics: RwLock::default(),
             raster_bounds: RwLock::default(),
             // font_ids_by_font: RwLock::default(),
             // wrapper_pool: Mutex::default(),
@@ -162,10 +167,43 @@ impl TextSystem {
     /// # Panics
     ///
     /// Panics if the font and none of the fallbacks can be resolved.
-    pub fn resolve_font(&self, _font: &Font) -> FontId {
-        // parley::
+    pub fn resolve_font(&self, font: &Font) -> FontId {
+        let mut font_ctx = self.font_ctx.lock();
+        let FontContext {
+            collection,
+            source_cache,
+        } = &mut *font_ctx;
 
-        todo!()
+        let mut query = collection.query(source_cache);
+        query.set_families([
+            QueryFamily::Named(&font.family),
+            QueryFamily::Generic(GenericFamily::UiMonospace),
+        ]);
+        query.set_attributes(Attributes {
+            width: FontWidth::NORMAL,
+            style: match font.style {
+                FontStyle::Normal => parley::FontStyle::Normal,
+                FontStyle::Italic => parley::FontStyle::Italic,
+                FontStyle::Oblique => parley::FontStyle::Oblique(None),
+            },
+            weight: parley::FontWeight::new(font.weight.0),
+        });
+
+        let mut selected = None;
+        query.matches_with(|query| {
+            selected = Some(FontData {
+                data: query.blob.clone(),
+                index: query.index,
+            });
+            QueryStatus::Stop
+        });
+
+        let font = selected.unwrap();
+        let font_id = FontId(font.data.id(), font.index);
+        self.resolved_fonts.write().entry(font_id).or_insert(font);
+
+        font_id
+
         // if let Ok(font_id) = self.font_id(font) {
         //     return font_id;
         // }
@@ -185,6 +223,19 @@ impl TextSystem {
         // );
     }
 
+    fn font_metrics(&self, font_id: FontId, font_size: Pixels) -> Metrics {
+        if let Some(&metrics) = self.font_metrics.read().get(&font_id) {
+            return metrics.scale(font_size.0);
+        }
+
+        let resolved_fonts = self.resolved_fonts.read();
+        let font = resolved_fonts.get(&font_id).unwrap();
+        let font_ref = FontRef::from_index(font.data.data(), font.index as usize).unwrap();
+        let metrics = font_ref.metrics(&[]);
+        self.font_metrics.write().insert(font_id, metrics);
+        metrics.scale(font_size.0)
+    }
+
     /// Get the bounding box for the given font and font size.
     /// A font's bounding box is the smallest rectangle that could enclose all glyphs
     /// in the font. superimposed over one another.
@@ -196,11 +247,27 @@ impl TextSystem {
     /// Get the typographic bounds for the given character, in the given font and size.
     pub fn typographic_bounds(
         &self,
-        _font_id: FontId,
-        _font_size: Pixels,
-        _character: char,
+        font_id: FontId,
+        font_size: Pixels,
+        ch: char,
     ) -> Result<Bounds<Pixels>> {
-        todo!()
+        let resolved_fonts = self.resolved_fonts.read();
+        let font = resolved_fonts.get(&font_id).unwrap();
+        let font_ref = FontRef::from_index(font.data.data(), font.index as usize).unwrap();
+        let metrics = font_ref.glyph_metrics(&[]).scale(font_size.0);
+        let glyph_id = font_ref.charmap().map(ch);
+
+        Ok(bounds(
+            point(
+                px(metrics.lsb(glyph_id)), // this isn't quite right https://github.com/servo/font-kit/blob/868f28a2c60d36092be66e4d83db001267c9d6b4/src/loaders/freetype.rs#L605C16-L605C76
+                px(metrics.tsb(glyph_id) - metrics.advance_height(glyph_id)),
+            ),
+            size(
+                px(metrics.advance_width(glyph_id)),
+                px(metrics.advance_height(glyph_id)),
+            ),
+        ))
+
         // let glyph_id = self
         //     .platform_text_system
         //     .glyph_for_char(font_id, character)
@@ -214,8 +281,17 @@ impl TextSystem {
     }
 
     /// Get the advance width for the given character, in the given font and size.
-    pub fn advance(&self, _font_id: FontId, _font_size: Pixels, _ch: char) -> Result<Size<Pixels>> {
-        todo!()
+    pub fn advance(&self, font_id: FontId, font_size: Pixels, ch: char) -> Result<Size<Pixels>> {
+        let resolved_fonts = self.resolved_fonts.read();
+        let font = resolved_fonts.get(&font_id).unwrap();
+        let font_ref = FontRef::from_index(font.data.data(), font.index as usize).unwrap();
+        let metrics = font_ref.glyph_metrics(&[]).scale(font_size.0);
+        let glyph_id = font_ref.charmap().map(ch);
+
+        Ok(size(
+            px(metrics.advance_width(glyph_id)),
+            px(metrics.advance_height(glyph_id)),
+        ))
         // let glyph_id = self
         //     .platform_text_system
         //     .glyph_for_char(font_id, ch)
@@ -229,65 +305,65 @@ impl TextSystem {
     /// Returns the width of an `em`.
     ///
     /// Uses the width of the `m` character in the given font and size.
-    pub fn em_width(&self, _font_id: FontId, _font_size: Pixels) -> Result<Pixels> {
-        todo!()
+    pub fn em_width(&self, font_id: FontId, font_size: Pixels) -> Result<Pixels> {
+        Ok(self.advance(font_id, font_size, 'm')?.width)
         // Ok(self.typographic_bounds(font_id, font_size, 'm')?.size.width)
     }
 
     /// Returns the advance width of an `em`.
     ///
     /// Uses the advance width of the `m` character in the given font and size.
-    pub fn em_advance(&self, _font_id: FontId, _font_size: Pixels) -> Result<Pixels> {
-        todo!()
+    pub fn em_advance(&self, font_id: FontId, font_size: Pixels) -> Result<Pixels> {
+        Ok(self.advance(font_id, font_size, 'm')?.width)
         // Ok(self.advance(font_id, font_size, 'm')?.width)
     }
 
     /// Returns the width of an `ch`.
     ///
     /// Uses the width of the `0` character in the given font and size.
-    pub fn ch_width(&self, _font_id: FontId, _font_size: Pixels) -> Result<Pixels> {
-        todo!()
+    pub fn ch_width(&self, font_id: FontId, font_size: Pixels) -> Result<Pixels> {
+        Ok(self.advance(font_id, font_size, '0')?.width)
         // Ok(self.typographic_bounds(font_id, font_size, '0')?.size.width)
     }
 
     /// Returns the advance width of an `ch`.
     ///
     /// Uses the advance width of the `0` character in the given font and size.
-    pub fn ch_advance(&self, _font_id: FontId, _font_size: Pixels) -> Result<Pixels> {
-        todo!()
+    pub fn ch_advance(&self, font_id: FontId, font_size: Pixels) -> Result<Pixels> {
+        Ok(self.advance(font_id, font_size, '0')?.width)
         // Ok(self.advance(font_id, font_size, '0')?.width)
     }
 
     /// Get the number of font size units per 'em square',
     /// Per MDN: "an abstract square whose height is the intended distance between
     /// lines of type in the same type size"
-    pub fn units_per_em(&self, _font_id: FontId) -> u32 {
-        todo!()
+    pub fn units_per_em(&self, font_id: FontId) -> u32 {
+        self.font_metrics(font_id, px(1.0)).units_per_em as u32
         // self.read_metrics(font_id, |metrics| metrics.units_per_em)
     }
 
     /// Get the height of a capital letter in the given font and size.
-    pub fn cap_height(&self, _font_id: FontId, _font_size: Pixels) -> Pixels {
-        todo!()
+    pub fn cap_height(&self, font_id: FontId, font_size: Pixels) -> Pixels {
+        self.font_metrics(font_id, font_size).cap_height.into()
         // self.read_metrics(font_id, |metrics| metrics.cap_height(font_size))
     }
 
     /// Get the height of the x character in the given font and size.
-    pub fn x_height(&self, _font_id: FontId, _font_size: Pixels) -> Pixels {
-        todo!()
+    pub fn x_height(&self, font_id: FontId, font_size: Pixels) -> Pixels {
+        self.font_metrics(font_id, font_size).x_height.into()
         // self.read_metrics(font_id, |metrics| metrics.x_height(font_size))
     }
 
     /// Get the recommended distance from the baseline for the given font
-    pub fn ascent(&self, _font_id: FontId, _font_size: Pixels) -> Pixels {
-        todo!()
+    pub fn ascent(&self, font_id: FontId, font_size: Pixels) -> Pixels {
+        self.font_metrics(font_id, font_size).ascent.into()
         // self.read_metrics(font_id, |metrics| metrics.ascent(font_size))
     }
 
     /// Get the recommended distance below the baseline for the given font,
     /// in single spaced text.
-    pub fn descent(&self, _font_id: FontId, _font_size: Pixels) -> Pixels {
-        todo!()
+    pub fn descent(&self, font_id: FontId, font_size: Pixels) -> Pixels {
+        self.font_metrics(font_id, font_size).descent.into()
         // self.read_metrics(font_id, |metrics| metrics.descent(font_size))
     }
 
@@ -416,6 +492,11 @@ impl WindowTextSystem {
         for run in runs.iter().filter(|run| run.len > 0) {
             let range = offset..offset + run.len;
             offset += run.len;
+
+            builder.push_default(StyleProperty::FontStack(FontStack::List(Cow::Owned(vec![
+                FontFamily::Named(Cow::Borrowed(&run.font.family)),
+                FontFamily::Generic(GenericFamily::UiMonospace),
+            ]))));
 
             builder.push(
                 StyleProperty::FontStyle(match run.font.style {
@@ -580,63 +661,62 @@ impl WindowTextSystem {
         // self.line_layout_cache.finish_frame()
     }
 
-    /// Layout the given line of text, at the given font_size.
-    /// Subsets of the line can be styled independently with the `runs` parameter.
-    /// Generally, you should prefer to use [`Self::shape_line`] instead, which
-    /// can be painted directly.
-    pub fn layout_line(
-        &self,
-        _text: &str,
-        _font_size: Pixels,
-        _runs: &[TextRun],
-        _force_width: Option<Pixels>,
-    ) -> Arc<LineLayout> {
-        todo!()
-        // let mut last_run = None::<&TextRun>;
-        // let mut last_font: Option<FontId> = None;
-        // let mut font_runs = self.font_runs_pool.lock().pop().unwrap_or_default();
-        // font_runs.clear();
+    // /// Layout the given line of text, at the given font_size.
+    // /// Subsets of the line can be styled independently with the `runs` parameter.
+    // /// Generally, you should prefer to use [`Self::shape_line`] instead, which
+    // /// can be painted directly.
+    // pub fn layout_line(
+    //     &self,
+    //     _text: &str,
+    //     _font_size: Pixels,
+    //     _runs: &[TextRun],
+    //     _force_width: Option<Pixels>,
+    // ) -> Arc<LineLayout> {
+    //     let mut last_run = None::<&TextRun>;
+    //     let mut last_font: Option<FontId> = None;
+    //     let mut font_runs = self.font_runs_pool.lock().pop().unwrap_or_default();
+    //     font_runs.clear();
 
-        // for run in runs.iter() {
-        //     let decoration_changed = if let Some(last_run) = last_run
-        //         && last_run.color == run.color
-        //         && last_run.underline == run.underline
-        //         && last_run.strikethrough == run.strikethrough
-        //     // we do not consider differing background color relevant, as it does not affect glyphs
-        //     // && last_run.background_color == run.background_color
-        //     {
-        //         false
-        //     } else {
-        //         last_run = Some(run);
-        //         true
-        //     };
+    //     for run in runs.iter() {
+    //         let decoration_changed = if let Some(last_run) = last_run
+    //             && last_run.color == run.color
+    //             && last_run.underline == run.underline
+    //             && last_run.strikethrough == run.strikethrough
+    //         // we do not consider differing background color relevant, as it does not affect glyphs
+    //         // && last_run.background_color == run.background_color
+    //         {
+    //             false
+    //         } else {
+    //             last_run = Some(run);
+    //             true
+    //         };
 
-        //     if let Some(font_run) = font_runs.last_mut()
-        //         && Some(font_run.font_id) == last_font
-        //         && !decoration_changed
-        //     {
-        //         font_run.len += run.len;
-        //     } else {
-        //         let font_id = self.resolve_font(&run.font);
-        //         last_font = Some(font_id);
-        //         font_runs.push(FontRun {
-        //             len: run.len,
-        //             font_id,
-        //         });
-        //     }
-        // }
+    //         if let Some(font_run) = font_runs.last_mut()
+    //             && Some(font_run.font_id) == last_font
+    //             && !decoration_changed
+    //         {
+    //             font_run.len += run.len;
+    //         } else {
+    //             let font_id = self.resolve_font(&run.font);
+    //             last_font = Some(font_id);
+    //             font_runs.push(FontRun {
+    //                 len: run.len,
+    //                 font_id,
+    //             });
+    //         }
+    //     }
 
-        // let layout = self.line_layout_cache.layout_line(
-        //     &SharedString::new(text),
-        //     font_size,
-        //     &font_runs,
-        //     force_width,
-        // );
+    //     let layout = self.line_layout_cache.layout_line(
+    //         &SharedString::new(text),
+    //         font_size,
+    //         &font_runs,
+    //         force_width,
+    //     );
 
-        // self.font_runs_pool.lock().push(font_runs);
+    //     self.font_runs_pool.lock().push(font_runs);
 
-        // layout
-    }
+    //     layout
+    // }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

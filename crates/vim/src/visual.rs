@@ -373,10 +373,15 @@ impl Vim {
                 let laid_out_line = map.layout_row(row, &text_layout_details);
                 let start = DisplayPoint::new(
                     row,
-                    laid_out_line.closest_index_for_x(positions.start) as u32,
+                    laid_out_line
+                        .closest_index_for_position(gpui::point(positions.start, 0.0.into()))
+                        as u32,
                 );
-                let mut end =
-                    DisplayPoint::new(row, laid_out_line.closest_index_for_x(positions.end) as u32);
+                let mut end = DisplayPoint::new(
+                    row,
+                    laid_out_line.closest_index_for_position(gpui::point(positions.end, 0.0.into()))
+                        as u32,
+                );
                 if end <= start {
                     if start.column() == map.line_len(start.row()) {
                         end = start;
@@ -385,7 +390,7 @@ impl Vim {
                     }
                 }
 
-                if positions.start <= laid_out_line.width {
+                if positions.start <= laid_out_line.size().width {
                     let selection = Selection {
                         id: s.new_selection_id(),
                         start: start.to_point(map),
