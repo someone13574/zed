@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::{
-    Bounds, DevicePixels, FontId, PlatformTextSystem, RenderGlyphParams, SUBPIXEL_VARIANTS_X,
-    SUBPIXEL_VARIANTS_Y, Size, point, size,
+    Bounds, DevicePixels, FontId, GlyphId, Pixels, PlatformTextSystem, Point, RenderGlyphParams,
+    SUBPIXEL_VARIANTS_X, SUBPIXEL_VARIANTS_Y, Size, point, size,
 };
 use anyhow::{Ok, Result};
 // use cosmic_text::{
@@ -10,15 +10,16 @@ use anyhow::{Ok, Result};
 //     FontSystem, ShapeBuffer, ShapeLine, SwashCache,
 // };
 
+use collections::FxHashMap;
 use parking_lot::RwLock;
 use parley::{FontData, fontique::Blob};
 use swash::{
     CacheKey, FontRef,
-    scale::{Render, ScaleContext, Source, StrikeWith},
+    scale::{Render, ScaleContext, Source, StrikeWith, image::Image},
     zeno::{Format, Vector},
 };
 
-pub(crate) struct CosmicTextSystem(RwLock<CosmicTextSystemState>);
+pub(crate) struct SwashTextSystem(RwLock<SwashTextSystemState>);
 
 struct LoadedFont {
     data: Blob<u8>,
@@ -26,9 +27,19 @@ struct LoadedFont {
     key: CacheKey,
 }
 
-struct CosmicTextSystemState {
-    font_cache: HashMap<FontId, LoadedFont>,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct ImageCacheKey {
+    font: FontId,
+    glyph_id: GlyphId,
+    font_size_bits: u32,
+    subpixel_variant: Point<u8>,
+    scale_factor_bits: u32,
+}
+
+struct SwashTextSystemState {
+    font_cache: FxHashMap<FontId, LoadedFont>,
     scale_ctx: ScaleContext,
+    image_cache: FxHashMap<ImageCacheKey, Image>,
     // _swash_cache: SwashCache,
     // font_system: FontSystem,
     // scratch: ShapeBuffer,
@@ -45,14 +56,15 @@ struct CosmicTextSystemState {
 //     is_known_emoji_font: bool,
 // }
 
-impl CosmicTextSystem {
+impl SwashTextSystem {
     pub(crate) fn new() -> Self {
         // todo(linux) make font loading non-blocking
         // let mut font_system = FontSystem::new();
 
-        Self(RwLock::new(CosmicTextSystemState {
-            font_cache: HashMap::new(),
+        Self(RwLock::new(SwashTextSystemState {
+            font_cache: FxHashMap::default(),
             scale_ctx: ScaleContext::new(),
+            image_cache: FxHashMap::default(),
             // font_system,
             // _swash_cache: SwashCache::new(),
             // scratch: ShapeBuffer::default(),
@@ -62,14 +74,14 @@ impl CosmicTextSystem {
     }
 }
 
-impl Default for CosmicTextSystem {
+impl Default for SwashTextSystem {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[allow(unused)]
-impl PlatformTextSystem for CosmicTextSystem {
+impl PlatformTextSystem for SwashTextSystem {
     fn add_font(&self, font: FontData) -> Result<()> {
         let id = FontId(font.data.id(), font.index);
         let cache = &mut self.0.write().font_cache;
@@ -200,7 +212,7 @@ impl PlatformTextSystem for CosmicTextSystem {
     // }
 }
 
-impl CosmicTextSystemState {
+impl SwashTextSystemState {
     //     fn loaded_font(&self, font_id: FontId) -> &LoadedFont {
     //         &self.loaded_fonts[font_id.0]
     //     }
@@ -287,34 +299,54 @@ impl CosmicTextSystemState {
     //         }
     //     }
 
+    fn get_image(&mut self, params: &RenderGlyphParams) -> &Image {
+        self.image_cache
+            .entry(ImageCacheKey {
+                font: params.font_id,
+                glyph_id: params.glyph_id,
+                font_size_bits: params.font_size.0.to_bits(),
+                subpixel_variant: params.subpixel_variant,
+                scale_factor_bits: params.scale_factor.to_bits(),
+            })
+            .or_insert_with(|| {
+                let font = self.font_cache.get(&params.font_id).unwrap();
+                let font_ref = FontRef {
+                    data: font.data.data(),
+                    offset: font.offset,
+                    key: font.key,
+                };
+
+                let subpixel_shift = point(
+                    params.subpixel_variant.x as f32
+                        / SUBPIXEL_VARIANTS_X as f32
+                        / params.scale_factor,
+                    params.subpixel_variant.y as f32
+                        / SUBPIXEL_VARIANTS_Y as f32
+                        / params.scale_factor,
+                );
+
+                let mut scaler = self
+                    .scale_ctx
+                    .builder(font_ref)
+                    .size(params.font_size.0 * params.scale_factor)
+                    .build();
+                let image = Render::new(&[
+                    Source::ColorOutline(0),
+                    Source::Outline,
+                    Source::ColorBitmap(StrikeWith::BestFit),
+                    Source::Bitmap(StrikeWith::BestFit),
+                ])
+                .format(Format::Alpha)
+                .offset(Vector::new(subpixel_shift.x, subpixel_shift.y))
+                .render(&mut scaler, params.glyph_id.0.try_into().unwrap())
+                .unwrap();
+
+                image
+            })
+    }
+
     fn raster_bounds(&mut self, params: &RenderGlyphParams) -> Result<Bounds<DevicePixels>> {
-        let font = self.font_cache.get(&params.font_id).unwrap();
-        let font_ref = FontRef {
-            data: font.data.data(),
-            offset: font.offset,
-            key: font.key,
-        };
-
-        let subpixel_shift = point(
-            params.subpixel_variant.x as f32 / SUBPIXEL_VARIANTS_X as f32 / params.scale_factor,
-            params.subpixel_variant.y as f32 / SUBPIXEL_VARIANTS_Y as f32 / params.scale_factor,
-        );
-
-        let mut scaler = self
-            .scale_ctx
-            .builder(font_ref)
-            .size(params.font_size.0 * params.scale_factor)
-            .build();
-        let image = Render::new(&[
-            Source::ColorOutline(0),
-            Source::Outline,
-            Source::ColorBitmap(StrikeWith::BestFit),
-            Source::Bitmap(StrikeWith::BestFit),
-        ])
-        .format(Format::Alpha)
-        .offset(Vector::new(subpixel_shift.x, subpixel_shift.y))
-        .render(&mut scaler, params.glyph_id.0.try_into().unwrap())
-        .unwrap();
+        let image = self.get_image(params);
         Ok(Bounds {
             origin: point(image.placement.left.into(), (-image.placement.top).into()),
             size: size(image.placement.width.into(), image.placement.height.into()),
@@ -356,34 +388,9 @@ impl CosmicTextSystemState {
             anyhow::bail!("glyph bounds are empty");
         } else {
             let bitmap_size = glyph_bounds.size;
-            let font = self.font_cache.get(&params.font_id).unwrap();
-            let font_ref = FontRef {
-                data: font.data.data(),
-                offset: font.offset,
-                key: font.key,
-            };
-            let subpixel_shift = point(
-                params.subpixel_variant.x as f32 / SUBPIXEL_VARIANTS_X as f32 / params.scale_factor,
-                params.subpixel_variant.y as f32 / SUBPIXEL_VARIANTS_Y as f32 / params.scale_factor,
-            );
+            let image = self.get_image(params);
 
-            let mut scaler = self
-                .scale_ctx
-                .builder(font_ref)
-                .size(params.font_size.0 * params.scale_factor)
-                .build();
-            let image = Render::new(&[
-                Source::ColorOutline(0),
-                Source::Outline,
-                Source::ColorBitmap(StrikeWith::BestFit),
-                Source::Bitmap(StrikeWith::BestFit),
-            ])
-            .format(Format::Alpha)
-            .offset(Vector::new(subpixel_shift.x, subpixel_shift.y))
-            .render(&mut scaler, params.glyph_id.0.try_into().unwrap())
-            .unwrap();
-
-            Ok((bitmap_size, image.data))
+            Ok((bitmap_size, image.data.clone()))
             // let bitmap_size = glyph_bounds.size;
             // let font = &self.loaded_fonts[params.font_id.0].font;
             // let subpixel_shift = point(
@@ -649,17 +656,17 @@ impl CosmicTextSystemState {
 //     }
 // }
 
-fn font_into_properties(font: &crate::Font) -> font_kit::properties::Properties {
-    font_kit::properties::Properties {
-        style: match font.style {
-            crate::FontStyle::Normal => font_kit::properties::Style::Normal,
-            crate::FontStyle::Italic => font_kit::properties::Style::Italic,
-            crate::FontStyle::Oblique => font_kit::properties::Style::Oblique,
-        },
-        weight: font_kit::properties::Weight(font.weight.0),
-        stretch: Default::default(),
-    }
-}
+// fn font_into_properties(font: &crate::Font) -> font_kit::properties::Properties {
+//     font_kit::properties::Properties {
+//         style: match font.style {
+//             crate::FontStyle::Normal => font_kit::properties::Style::Normal,
+//             crate::FontStyle::Italic => font_kit::properties::Style::Italic,
+//             crate::FontStyle::Oblique => font_kit::properties::Style::Oblique,
+//         },
+//         weight: font_kit::properties::Weight(font.weight.0),
+//         stretch: Default::default(),
+//     }
+// }
 
 // fn face_info_into_properties(
 //     face_info: &cosmic_text::fontdb::FaceInfo,
@@ -686,7 +693,7 @@ fn font_into_properties(font: &crate::Font) -> font_kit::properties::Properties 
 //     }
 // }
 
-fn check_is_known_emoji_font(postscript_name: &str) -> bool {
-    // TODO: Include other common emoji fonts
-    postscript_name == "NotoColorEmoji"
-}
+// fn check_is_known_emoji_font(postscript_name: &str) -> bool {
+//     // TODO: Include other common emoji fonts
+//     postscript_name == "NotoColorEmoji"
+// }

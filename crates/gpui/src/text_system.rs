@@ -9,24 +9,27 @@ pub use font_fallbacks::*;
 pub use font_features::*;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use parley::{
-    Alignment, AlignmentOptions, FontContext, FontData, FontFamily, FontStack, FontWidth,
-    GenericFamily, Layout, LayoutContext, LineHeight, PositionedLayoutItem, StyleProperty,
+    Alignment, AlignmentOptions, FontContext, FontData, FontWidth, GenericFamily, Layout,
+    LayoutContext, PositionedLayoutItem,
     fontique::{Attributes, QueryFamily, QueryStatus},
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use swash::{FontRef, Metrics};
 
 use crate::{
     Bounds, DevicePixels, Hsla, Pixels, PlatformTextSystem, Point, Result, SharedString, Size,
     StrikethroughStyle, TextAlign, UnderlineStyle, Window, bounds, fill, point, px, size,
+    text_system::line_layout::{FontRun, LineLayoutCache},
 };
 use core::fmt;
 use derive_more::{Add, Deref, FromStr, Sub};
+pub(crate) use line_layout::LayoutIndex;
 use std::{
-    borrow::Cow,
     fmt::{Debug, Display, Formatter},
     hash::{Hash, Hasher},
+    ops::Range,
     sync::Arc,
 };
 
@@ -52,14 +55,14 @@ pub(crate) const SUBPIXEL_VARIANTS_Y: u8 =
 pub struct TextSystem {
     platform_text_system: Arc<dyn PlatformTextSystem>,
     font_ctx: Mutex<FontContext>,
-    layout_ctx: Mutex<LayoutContext<Brush>>,
+    layout_ctx: Mutex<LayoutContext<usize>>,
     resolved_fonts: RwLock<FxHashMap<FontId, FontData>>,
     // font_ids_by_font: RwLock<FxHashMap<Font, Result<FontId>>>,
     // font_metrics: RwLock<FxHashMap<FontId, FontMetrics>>,
     font_metrics: RwLock<FxHashMap<FontId, Metrics>>,
     raster_bounds: RwLock<FxHashMap<RenderGlyphParams, Bounds<DevicePixels>>>,
     // wrapper_pool: Mutex<FxHashMap<FontIdWithSize, Vec<LineWrapper>>>,
-    // font_runs_pool: Mutex<Vec<Vec<FontRun>>>,
+    font_runs_pool: Mutex<Vec<Vec<FontRun>>>,
     // fallback_font_stack: SmallVec<[Font; 2]>,
 }
 
@@ -74,7 +77,7 @@ impl TextSystem {
             raster_bounds: RwLock::default(),
             // font_ids_by_font: RwLock::default(),
             // wrapper_pool: Mutex::default(),
-            // font_runs_pool: Mutex::default(),
+            font_runs_pool: Mutex::default(),
             // fallback_font_stack: smallvec![
             //     // TODO: Remove this when Linux have implemented setting fallbacks.
             //     font(".ZedMono"),
@@ -429,7 +432,7 @@ impl TextSystem {
 /// The GPUI text layout subsystem.
 #[derive(Deref)]
 pub struct WindowTextSystem {
-    // line_layout_cache: LineLayoutCache,
+    line_layout_cache: LineLayoutCache,
     #[deref]
     text_system: Arc<TextSystem>,
 }
@@ -437,24 +440,40 @@ pub struct WindowTextSystem {
 impl WindowTextSystem {
     pub(crate) fn new(text_system: Arc<TextSystem>) -> Self {
         Self {
-            // line_layout_cache: LineLayoutCache::new(text_system.platform_text_system.clone()),
+            line_layout_cache: LineLayoutCache::new(),
             text_system,
         }
     }
 
-    // pub(crate) fn layout_index(&self) -> LineLayoutIndex {
-    //     todo!()
-    //     // self.line_layout_cache.layout_index()
-    // }
+    pub(crate) fn layout_index(&self) -> LayoutIndex {
+        self.line_layout_cache.layout_index()
+    }
 
-    // pub(crate) fn reuse_layouts(&self, _index: Range<LineLayoutIndex>) {
-    //     todo!()
-    //     // self.line_layout_cache.reuse_layouts(index)
-    // }
+    pub(crate) fn reuse_layouts(&self, index: Range<LayoutIndex>) {
+        self.line_layout_cache.reuse_layouts(index)
+    }
 
-    // pub(crate) fn truncate_layouts(&self, _index: LineLayoutIndex) {
-    //     todo!()
-    //     // self.line_layout_cache.truncate_layouts(index)
+    pub(crate) fn truncate_layouts(&self, index: LayoutIndex) {
+        self.line_layout_cache.truncate_layouts(index)
+    }
+
+    // /// Shape the given line, at the given font_size, for painting to the screen.
+    // /// Subsets of the line can be styled independently with the `runs` parameter.
+    // ///
+    // /// Note that this method can only shape a single line of text. It will panic
+    // /// if the text contains newlines. If you need to shape multiple lines of text,
+    // /// use [`Self::shape_text`] instead.
+    // pub fn shape_line(
+    //     &self,
+    //     text: SharedString,
+    //     font_size: Pixels,
+    //     runs: &[TextRun],
+    //     force_width: Option<Pixels>,
+    // ) {
+    //     debug_assert!(
+    //         text.find('\n').is_none(),
+    //         "text argument should not contain newlines"
+    //     );
     // }
 
     /// Shape a multi line string of text, at the given font_size, for painting to the screen.
@@ -467,184 +486,104 @@ impl WindowTextSystem {
         line_height: Pixels,
         runs: &[TextRun],
         wrap_width: Option<Pixels>,
-        line_clamp: Option<usize>,
+        _line_clamp: Option<usize>,
     ) -> ShapedText {
-        let mut layout_ctx = self.layout_ctx.lock();
-        let mut font_ctx = self.font_ctx.lock();
+        let mut font_runs = self.font_runs_pool.lock().pop().unwrap_or_default();
+        font_runs.clear();
 
-        let mut builder = layout_ctx.ranged_builder(&mut font_ctx, &text, 1.0, true);
-        builder.push_default(StyleProperty::FontSize(font_size.0));
-        builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(
-            line_height.0, // TODO_parley: allow metrics here
-        )));
-
-        let mut offset = 0;
-        for run in runs.iter().filter(|run| run.len > 0) {
-            let range = offset..offset + run.len;
-            offset += run.len;
-
-            builder.push_default(StyleProperty::FontStack(FontStack::List(Cow::Owned(vec![
-                FontFamily::Named(Cow::Borrowed(&run.font.family)),
-                FontFamily::Generic(GenericFamily::UiMonospace),
-            ]))));
-
-            builder.push(
-                StyleProperty::FontStyle(match run.font.style {
-                    FontStyle::Normal => parley::FontStyle::Normal,
-                    FontStyle::Italic => parley::FontStyle::Italic,
-                    FontStyle::Oblique => parley::FontStyle::Oblique(None),
-                }),
-                range.clone(),
-            );
-
-            builder.push(
-                StyleProperty::FontWeight(parley::FontWeight::new(run.font.weight.0)),
-                range.clone(),
-            );
-
-            builder.push(
-                StyleProperty::Brush(Brush {
-                    color: run.color,
-                    background: run.background_color,
-                    underline: run.underline.map(|mut underline| {
-                        underline.color = underline.color.or(Some(run.color));
-                        underline
-                    }),
-                    strikethrough: run.strikethrough.map(|mut strikethrough| {
-                        strikethrough.color = strikethrough.color.or(Some(run.color));
-                        strikethrough
-                    }),
-                }),
-                range.clone(),
-            );
+        for run in runs {
+            font_runs.push(FontRun {
+                len: run.len,
+                font_id: FontId(0, 0),
+                font_weight: run.font.weight.0.to_bits(),
+                font_style: run.font.style,
+            });
         }
 
-        let mut layout = builder.build(&text);
-        layout.break_all_lines(wrap_width.map(|px| px.0));
+        let layout = self.line_layout_cache.layout_text(
+            text.clone(),
+            font_size,
+            line_height,
+            &font_runs,
+            wrap_width,
+            None,
+            &self.font_ctx,
+            &self.layout_ctx,
+        );
 
         ShapedText {
             layout,
+            brushes: runs
+                .into_iter()
+                .map(|run| Brush {
+                    color: run.color,
+                    background: run.background_color,
+                    underline: run.underline,
+                    strikethrough: run.strikethrough,
+                })
+                .collect(),
             text,
             line_height,
         }
-        // let mut runs = runs.iter().filter(|run| run.len > 0).cloned().peekable();
-        // let mut font_runs = self.font_runs_pool.lock().pop().unwrap_or_default();
 
-        // let mut lines = SmallVec::new();
-        // let mut max_wrap_lines = line_clamp;
-        // let mut wrapped_lines = 0;
+        // let mut layout_ctx = self.layout_ctx.lock();
+        // let mut font_ctx = self.font_ctx.lock();
 
-        // let mut process_line = |line_text: SharedString, line_start, line_end| {
-        //     font_runs.clear();
+        // let mut builder = layout_ctx.ranged_builder(&mut font_ctx, &text, 1.0, true);
+        // builder.push_default(StyleProperty::FontSize(font_size.0));
+        // builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(
+        //     line_height.0, // TODO_parley: allow metrics here
+        // )));
 
-        //     let mut decoration_runs = SmallVec::<[DecorationRun; 32]>::new();
-        //     let mut run_start = line_start;
-        //     while run_start < line_end {
-        //         let Some(run) = runs.peek_mut() else {
-        //             log::warn!("`TextRun`s do not cover the entire to be shaped text");
-        //             break;
-        //         };
+        // let mut offset = 0;
+        // for run in runs.iter().filter(|run| run.len > 0) {
+        //     let range = offset..offset + run.len;
+        //     offset += run.len;
 
-        //         let run_len_within_line = cmp::min(line_end - run_start, run.len);
+        //     builder.push_default(StyleProperty::FontStack(FontStack::List(Cow::Owned(vec![
+        //         FontFamily::Named(Cow::Borrowed(&run.font.family)),
+        //         FontFamily::Generic(GenericFamily::UiMonospace),
+        //     ]))));
 
-        //         let decoration_changed = if let Some(last_run) = decoration_runs.last_mut()
-        //             && last_run.color == run.color
-        //             && last_run.underline == run.underline
-        //             && last_run.strikethrough == run.strikethrough
-        //             && last_run.background_color == run.background_color
-        //         {
-        //             last_run.len += run_len_within_line as u32;
-        //             false
-        //         } else {
-        //             decoration_runs.push(DecorationRun {
-        //                 len: run_len_within_line as u32,
-        //                 color: run.color,
-        //                 background_color: run.background_color,
-        //                 underline: run.underline,
-        //                 strikethrough: run.strikethrough,
-        //             });
-        //             true
-        //         };
-
-        //         let font_id = self.resolve_font(&run.font);
-        //         if let Some(font_run) = font_runs.last_mut()
-        //             && font_id == font_run.font_id
-        //             && !decoration_changed
-        //         {
-        //             font_run.len += run_len_within_line;
-        //         } else {
-        //             font_runs.push(FontRun {
-        //                 len: run_len_within_line,
-        //                 font_id,
-        //             });
-        //         }
-
-        //         // Preserve the remainder of the run for the next line
-        //         run.len -= run_len_within_line;
-        //         if run.len == 0 {
-        //             runs.next();
-        //         }
-        //         run_start += run_len_within_line;
-        //     }
-
-        //     let layout = self.line_layout_cache.layout_wrapped_line(
-        //         &line_text,
-        //         font_size,
-        //         &font_runs,
-        //         wrap_width,
-        //         max_wrap_lines.map(|max| max.saturating_sub(wrapped_lines)),
+        //     builder.push(
+        //         StyleProperty::FontStyle(match run.font.style {
+        //             FontStyle::Normal => parley::FontStyle::Normal,
+        //             FontStyle::Italic => parley::FontStyle::Italic,
+        //             FontStyle::Oblique => parley::FontStyle::Oblique(None),
+        //         }),
+        //         range.clone(),
         //     );
-        //     wrapped_lines += layout.wrap_boundaries.len();
 
-        //     lines.push(WrappedLine {
-        //         layout,
-        //         decoration_runs,
-        //         text: line_text,
-        //     });
-
-        //     // Skip `\n` character.
-        //     if let Some(run) = runs.peek_mut() {
-        //         run.len -= 1;
-        //         if run.len == 0 {
-        //             runs.next();
-        //         }
-        //     }
-        // };
-
-        // let mut split_lines = text.split('\n');
-
-        // // Special case single lines to prevent allocating a sharedstring
-        // if let Some(first_line) = split_lines.next()
-        //     && let Some(second_line) = split_lines.next()
-        // {
-        //     let mut line_start = 0;
-        //     process_line(
-        //         SharedString::new(first_line),
-        //         line_start,
-        //         line_start + first_line.len(),
+        //     builder.push(
+        //         StyleProperty::FontWeight(parley::FontWeight::new(run.font.weight.0)),
+        //         range.clone(),
         //     );
-        //     line_start += first_line.len() + '\n'.len_utf8();
-        //     process_line(
-        //         SharedString::new(second_line),
-        //         line_start,
-        //         line_start + second_line.len(),
+
+        //     builder.push(
+        //         StyleProperty::Brush(Brush {
+        //             color: run.color,
+        //             background: run.background_color,
+        //             underline: run.underline.map(|mut underline| {
+        //                 underline.color = underline.color.or(Some(run.color));
+        //                 underline
+        //             }),
+        //             strikethrough: run.strikethrough.map(|mut strikethrough| {
+        //                 strikethrough.color = strikethrough.color.or(Some(run.color));
+        //                 strikethrough
+        //             }),
+        //         }),
+        //         range.clone(),
         //     );
-        //     for line_text in split_lines {
-        //         line_start += line_text.len() + '\n'.len_utf8();
-        //         process_line(
-        //             SharedString::new(line_text),
-        //             line_start,
-        //             line_start + line_text.len(),
-        //         );
-        //     }
-        // } else {
-        //     let end = text.len();
-        //     process_line(text, 0, end);
         // }
 
-        // self.font_runs_pool.lock().push(font_runs);
+        // let mut layout = builder.build(&text);
+        // layout.break_all_lines(wrap_width.map(|px| px.0));
 
-        // Ok(lines)
+        // ShapedText {
+        //     layout,
+        //     text,
+        //     line_height,
+        // }
     }
 
     pub(crate) fn finish_frame(&self) {
@@ -717,21 +656,11 @@ struct Brush {
     strikethrough: Option<StrikethroughStyle>,
 }
 
-impl Default for Brush {
-    fn default() -> Self {
-        Self {
-            color: gpui::black(),
-            background: None,
-            underline: None,
-            strikethrough: None,
-        }
-    }
-}
-
 /// Text which has been shaped and laid-out
 #[derive(Clone)]
 pub struct ShapedText {
-    layout: Layout<Brush>,
+    layout: Arc<Layout<usize>>,
+    brushes: SmallVec<[Brush; 4]>,
     /// The text that was shaped
     pub text: SharedString,
     line_height: Pixels,
@@ -745,7 +674,8 @@ impl ShapedText {
 
     /// Sets the alignment of the shaped text within a container
     pub fn align(&mut self, container_width: Pixels, alignment: TextAlign) {
-        self.layout.align(
+        // TODO_parley: make this cache aligned layouts
+        Arc::make_mut(&mut self.layout).align(
             Some(container_width.0),
             match alignment {
                 TextAlign::Left => Alignment::Left,
@@ -759,7 +689,7 @@ impl ShapedText {
     }
 
     /// TODO_parly ref https://github.com/zed-industries/zed/pull/20841
-    pub fn with_len(&self, len: usize) -> Self {
+    pub fn with_len(&self, _len: usize) -> Self {
         self.clone()
     }
 
@@ -902,7 +832,7 @@ impl ShapedText {
                             let font_size = px(glyph_run.run().font_size());
                             window.text_system().add_font(font.clone()).unwrap();
 
-                            let brush = &glyph_run.style().brush;
+                            let brush = &self.brushes[glyph_run.style().brush];
                             if let Some(bg) = brush.background {
                                 window.paint_quad(fill(
                                     Bounds::new(
@@ -1115,7 +1045,7 @@ impl Display for FontStyle {
 }
 
 /// A styled run of text, for use in [`crate::TextLayout`].
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Hash)]
 pub struct TextRun {
     /// A number of utf8 bytes
     pub len: usize,

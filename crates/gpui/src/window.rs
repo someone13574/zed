@@ -6,11 +6,11 @@ use crate::{
     Context, Corners, CursorStyle, Decorations, DevicePixels, DispatchActionListener,
     DispatchNodeId, DispatchTree, DisplayId, Edges, Effect, Entity, EntityId, EventEmitter,
     FileDropEvent, FontId, Global, GlobalElementId, GlyphId, GpuSpecs, Hsla, InputHandler, IsZero,
-    KeyBinding, KeyContext, KeyDownEvent, KeyEvent, Keystroke, KeystrokeEvent, LayoutId, Modifiers,
-    ModifiersChangedEvent, MonochromeSprite, MouseButton, MouseEvent, MouseMoveEvent, MouseUpEvent,
-    Path, Pixels, PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler,
-    PlatformWindow, Point, PolychromeSprite, PromptButton, PromptLevel, Quad, Render,
-    RenderGlyphParams, RenderImage, RenderImageParams, RenderSvgParams, Replay, ResizeEdge,
+    KeyBinding, KeyContext, KeyDownEvent, KeyEvent, Keystroke, KeystrokeEvent, LayoutId,
+    LayoutIndex, Modifiers, ModifiersChangedEvent, MonochromeSprite, MouseButton, MouseEvent,
+    MouseMoveEvent, MouseUpEvent, Path, Pixels, PlatformAtlas, PlatformDisplay, PlatformInput,
+    PlatformInputHandler, PlatformWindow, Point, PolychromeSprite, PromptButton, PromptLevel, Quad,
+    Render, RenderGlyphParams, RenderImage, RenderImageParams, RenderSvgParams, Replay, ResizeEdge,
     SMOOTH_SVG_SCALE_FACTOR, SUBPIXEL_VARIANTS_X, SUBPIXEL_VARIANTS_Y, ScaledPixels, Scene, Shadow,
     SharedString, Size, StrikethroughStyle, Style, SubscriberSet, Subscription, SystemWindowTab,
     SystemWindowTabController, TabStopMap, TaffyLayoutEngine, Task, TextStyle, TextStyleRefinement,
@@ -701,7 +701,7 @@ pub(crate) struct PrepaintStateIndex {
     deferred_draws_index: usize,
     dispatch_tree_index: usize,
     accessed_element_states_index: usize,
-    // line_layout_index: LineLayoutIndex,
+    line_layout_index: LayoutIndex,
 }
 
 #[derive(Clone, Default)]
@@ -712,7 +712,7 @@ pub(crate) struct PaintIndex {
     cursor_styles_index: usize,
     accessed_element_states_index: usize,
     tab_handle_index: usize,
-    // line_layout_index: LineLayoutIndex,
+    line_layout_index: LayoutIndex,
 }
 
 impl Frame {
@@ -2309,7 +2309,7 @@ impl Window {
             deferred_draws_index: self.next_frame.deferred_draws.len(),
             dispatch_tree_index: self.next_frame.dispatch_tree.len(),
             accessed_element_states_index: self.next_frame.accessed_element_states.len(),
-            // line_layout_index: self.text_system.layout_index(),
+            line_layout_index: self.text_system.layout_index(),
         }
     }
 
@@ -2331,8 +2331,8 @@ impl Window {
                 .iter()
                 .map(|(id, type_id)| (id.clone(), *type_id)),
         );
-        // self.text_system
-        //     .reuse_layouts(range.start.line_layout_index..range.end.line_layout_index);
+        self.text_system
+            .reuse_layouts(range.start.line_layout_index..range.end.line_layout_index);
 
         let reused_subtree = self.next_frame.dispatch_tree.reuse_subtree(
             range.start.dispatch_tree_index..range.end.dispatch_tree_index,
@@ -2370,7 +2370,7 @@ impl Window {
             cursor_styles_index: self.next_frame.cursor_styles.len(),
             accessed_element_states_index: self.next_frame.accessed_element_states.len(),
             tab_handle_index: self.next_frame.tab_stops.paint_index(),
-            // line_layout_index: self.text_system.layout_index(),
+            line_layout_index: self.text_system.layout_index(),
         }
     }
 
@@ -2404,8 +2404,8 @@ impl Window {
                 [range.start.tab_handle_index..range.end.tab_handle_index],
         );
 
-        // self.text_system
-        //     .reuse_layouts(range.start.line_layout_index..range.end.line_layout_index);
+        self.text_system
+            .reuse_layouts(range.start.line_layout_index..range.end.line_layout_index);
         self.next_frame.scene.replay(
             range.start.scene_index..range.end.scene_index,
             &self.rendered_frame.scene,
@@ -2561,7 +2561,7 @@ impl Window {
             self.next_frame
                 .accessed_element_states
                 .truncate(index.accessed_element_states_index);
-            // self.text_system.truncate_layouts(index.line_layout_index);
+            self.text_system.truncate_layouts(index.line_layout_index);
         }
         result
     }

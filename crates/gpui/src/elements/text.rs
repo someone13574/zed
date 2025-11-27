@@ -12,7 +12,6 @@ use std::{
     mem,
     ops::Range,
     rc::Rc,
-    sync::Arc,
 };
 
 impl Element for &'static str {

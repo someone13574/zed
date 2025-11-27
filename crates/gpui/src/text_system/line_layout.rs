@@ -392,284 +392,396 @@
 //     }
 // }
 
-// pub(crate) struct LineLayoutCache {
-//     previous_frame: Mutex<FrameCache>,
-//     current_frame: RwLock<FrameCache>,
-//     platform_text_system: Arc<dyn PlatformTextSystem>,
-// }
+use std::{
+    borrow::Borrow,
+    hash::{Hash, Hasher},
+    ops::Range,
+    sync::Arc,
+};
 
-// #[derive(Default)]
-// struct FrameCache {
-//     lines: FxHashMap<Arc<CacheKey>, Arc<LineLayout>>,
-//     wrapped_lines: FxHashMap<Arc<CacheKey>, Arc<WrappedLineLayout>>,
-//     used_lines: Vec<Arc<CacheKey>>,
-//     used_wrapped_lines: Vec<Arc<CacheKey>>,
-// }
+use collections::FxHashMap;
+use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
+use parley::{
+    FontContext, FontFamily, FontStack, GenericFamily, Layout, LayoutContext, LineHeight,
+    StyleProperty,
+};
+use smallvec::SmallVec;
 
-// #[derive(Clone, Default)]
-// pub(crate) struct LineLayoutIndex {
-//     lines_index: usize,
-//     wrapped_lines_index: usize,
-// }
+use crate::{FontId, FontStyle, Pixels, SharedString};
 
-// impl LineLayoutCache {
-//     pub fn new(platform_text_system: Arc<dyn PlatformTextSystem>) -> Self {
-//         Self {
-//             previous_frame: Mutex::default(),
-//             current_frame: RwLock::default(),
-//             platform_text_system,
-//         }
-//     }
+pub(crate) struct LineLayoutCache {
+    previous_frame: Mutex<FrameCache>,
+    current_frame: RwLock<FrameCache>,
+}
 
-//     pub fn layout_index(&self) -> LineLayoutIndex {
-//         let frame = self.current_frame.read();
-//         LineLayoutIndex {
-//             lines_index: frame.used_lines.len(),
-//             wrapped_lines_index: frame.used_wrapped_lines.len(),
-//         }
-//     }
+#[derive(Default)]
+struct FrameCache {
+    layouts: FxHashMap<Arc<CacheKey>, Arc<Layout<usize>>>,
+    used_layouts: Vec<Arc<CacheKey>>,
+    // lines: FxHashMap<Arc<CacheKey>, Arc<LineLayout>>,
+    // wrapped_lines: FxHashMap<Arc<CacheKey>, Arc<WrappedLineLayout>>,
+    // used_lines: Vec<Arc<CacheKey>>,
+    // used_wrapped_lines: Vec<Arc<CacheKey>>,
+}
 
-//     pub fn reuse_layouts(&self, range: Range<LineLayoutIndex>) {
-//         let mut previous_frame = &mut *self.previous_frame.lock();
-//         let mut current_frame = &mut *self.current_frame.write();
+#[derive(Clone, Copy, Default)]
+pub(crate) struct LayoutIndex(pub usize);
 
-//         for key in &previous_frame.used_lines[range.start.lines_index..range.end.lines_index] {
-//             if let Some((key, line)) = previous_frame.lines.remove_entry(key) {
-//                 current_frame.lines.insert(key, line);
-//             }
-//             current_frame.used_lines.push(key.clone());
-//         }
+impl LineLayoutCache {
+    pub fn new() -> Self {
+        Self {
+            previous_frame: Mutex::default(),
+            current_frame: RwLock::default(),
+        }
+    }
 
-//         for key in &previous_frame.used_wrapped_lines
-//             [range.start.wrapped_lines_index..range.end.wrapped_lines_index]
-//         {
-//             if let Some((key, line)) = previous_frame.wrapped_lines.remove_entry(key) {
-//                 current_frame.wrapped_lines.insert(key, line);
-//             }
-//             current_frame.used_wrapped_lines.push(key.clone());
-//         }
-//     }
+    pub fn layout_index(&self) -> LayoutIndex {
+        let frame = self.current_frame.read();
+        LayoutIndex(frame.used_layouts.len())
+    }
 
-//     pub fn truncate_layouts(&self, index: LineLayoutIndex) {
-//         let mut current_frame = &mut *self.current_frame.write();
-//         current_frame.used_lines.truncate(index.lines_index);
-//         current_frame
-//             .used_wrapped_lines
-//             .truncate(index.wrapped_lines_index);
-//     }
+    // pub fn layout_index(&self) -> LineLayoutIndex {
+    //     let frame = self.current_frame.read();
+    //     LineLayoutIndex {
+    //         lines_index: frame.used_lines.len(),
+    //         wrapped_lines_index: frame.used_wrapped_lines.len(),
+    //     }
+    // }
 
-//     pub fn finish_frame(&self) {
-//         let mut prev_frame = self.previous_frame.lock();
-//         let mut curr_frame = self.current_frame.write();
-//         std::mem::swap(&mut *prev_frame, &mut *curr_frame);
-//         curr_frame.lines.clear();
-//         curr_frame.wrapped_lines.clear();
-//         curr_frame.used_lines.clear();
-//         curr_frame.used_wrapped_lines.clear();
-//     }
+    pub fn reuse_layouts(&self, range: Range<LayoutIndex>) {
+        let mut previous_frame = &mut *self.previous_frame.lock();
+        let mut current_frame = &mut *self.current_frame.write();
 
-//     pub fn layout_wrapped_line<Text>(
-//         &self,
-//         text: Text,
-//         font_size: Pixels,
-//         runs: &[FontRun],
-//         wrap_width: Option<Pixels>,
-//         max_lines: Option<usize>,
-//     ) -> Arc<WrappedLineLayout>
-//     where
-//         Text: AsRef<str>,
-//         SharedString: From<Text>,
-//     {
-//         let key = &CacheKeyRef {
-//             text: text.as_ref(),
-//             font_size,
-//             runs,
-//             wrap_width,
-//             force_width: None,
-//         } as &dyn AsCacheKeyRef;
+        for key in &previous_frame.used_layouts[range.start.0..range.end.0] {
+            if let Some((key, layout)) = previous_frame.layouts.remove_entry(key) {
+                current_frame.layouts.insert(key, layout);
+            }
+            current_frame.used_layouts.push(key.clone());
+        }
+    }
 
-//         let current_frame = self.current_frame.upgradable_read();
-//         if let Some(layout) = current_frame.wrapped_lines.get(key) {
-//             return layout.clone();
-//         }
+    pub fn truncate_layouts(&self, index: LayoutIndex) {
+        let mut current_frame = &mut *self.current_frame.write();
+        current_frame.used_layouts.truncate(index.0);
+        // current_frame.used_lines.truncate(index.lines_index);
+        // current_frame
+        //     .used_wrapped_lines
+        //     .truncate(index.wrapped_lines_index);
+    }
 
-//         let previous_frame_entry = self.previous_frame.lock().wrapped_lines.remove_entry(key);
-//         if let Some((key, layout)) = previous_frame_entry {
-//             let mut current_frame = RwLockUpgradableReadGuard::upgrade(current_frame);
-//             current_frame
-//                 .wrapped_lines
-//                 .insert(key.clone(), layout.clone());
-//             current_frame.used_wrapped_lines.push(key);
-//             layout
-//         } else {
-//             drop(current_frame);
-//             let text = SharedString::from(text);
-//             let unwrapped_layout = self.layout_line::<&SharedString>(&text, font_size, runs, None);
-//             let wrap_boundaries = if let Some(wrap_width) = wrap_width {
-//                 unwrapped_layout.compute_wrap_boundaries(text.as_ref(), wrap_width, max_lines)
-//             } else {
-//                 SmallVec::new()
-//             };
-//             let layout = Arc::new(WrappedLineLayout {
-//                 unwrapped_layout,
-//                 wrap_boundaries,
-//                 wrap_width,
-//             });
-//             let key = Arc::new(CacheKey {
-//                 text,
-//                 font_size,
-//                 runs: SmallVec::from(runs),
-//                 wrap_width,
-//                 force_width: None,
-//             });
+    pub fn finish_frame(&self) {
+        let mut prev_frame = self.previous_frame.lock();
+        let mut curr_frame = self.current_frame.write();
+        std::mem::swap(&mut *prev_frame, &mut *curr_frame);
+        curr_frame.layouts.clear();
+        curr_frame.used_layouts.clear();
+        // curr_frame.lines.clear();
+        // curr_frame.wrapped_lines.clear();
+        // curr_frame.used_lines.clear();
+        // curr_frame.used_wrapped_lines.clear();
+    }
 
-//             let mut current_frame = self.current_frame.write();
-//             current_frame
-//                 .wrapped_lines
-//                 .insert(key.clone(), layout.clone());
-//             current_frame.used_wrapped_lines.push(key);
+    pub fn layout_text(
+        &self,
+        text: SharedString,
+        font_size: Pixels,
+        line_height: Pixels,
+        runs: &[FontRun],
+        wrap_width: Option<Pixels>,
+        force_spacing: Option<Pixels>,
+        font_ctx: &Mutex<FontContext>,
+        layout_ctx: &Mutex<LayoutContext<usize>>,
+    ) -> Arc<Layout<usize>> {
+        let key = &CacheKeyRef {
+            text: text.as_ref(),
+            font_size,
+            line_height,
+            runs,
+            wrap_width,
+            force_spacing,
+        } as &dyn AsCacheKeyRef;
 
-//             layout
-//         }
-//     }
+        let current_frame = self.current_frame.upgradable_read();
+        if let Some(layout) = current_frame.layouts.get(key) {
+            return layout.clone();
+        }
 
-//     pub fn layout_line<Text>(
-//         &self,
-//         text: Text,
-//         font_size: Pixels,
-//         runs: &[FontRun],
-//         force_width: Option<Pixels>,
-//     ) -> Arc<LineLayout>
-//     where
-//         Text: AsRef<str>,
-//         SharedString: From<Text>,
-//     {
-//         let key = &CacheKeyRef {
-//             text: text.as_ref(),
-//             font_size,
-//             runs,
-//             wrap_width: None,
-//             force_width,
-//         } as &dyn AsCacheKeyRef;
+        let previous_frame_entry = self.previous_frame.lock().layouts.remove_entry(key);
+        if let Some((key, layout)) = previous_frame_entry {
+            let mut current_frame = RwLockUpgradableReadGuard::upgrade(current_frame);
+            current_frame.layouts.insert(key.clone(), layout.clone());
+            current_frame.used_layouts.push(key);
+            layout
+        } else {
+            drop(current_frame);
 
-//         let current_frame = self.current_frame.upgradable_read();
-//         if let Some(layout) = current_frame.lines.get(key) {
-//             return layout.clone();
-//         }
+            let mut layout_ctx = layout_ctx.lock();
+            let mut font_ctx = font_ctx.lock();
 
-//         let mut current_frame = RwLockUpgradableReadGuard::upgrade(current_frame);
-//         if let Some((key, layout)) = self.previous_frame.lock().lines.remove_entry(key) {
-//             current_frame.lines.insert(key.clone(), layout.clone());
-//             current_frame.used_lines.push(key);
-//             layout
-//         } else {
-//             let text = SharedString::from(text);
-//             let mut layout = self
-//                 .platform_text_system
-//                 .layout_line(&text, font_size, runs);
+            let mut builder = layout_ctx.ranged_builder(&mut font_ctx, text.as_ref(), 1.0, false);
+            builder.push_default(StyleProperty::FontSize(font_size.0));
+            builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(
+                line_height.0, // TODO_parley: allow metrics here
+            )));
 
-//             if let Some(force_width) = force_width {
-//                 let mut glyph_pos = 0;
-//                 for run in layout.runs.iter_mut() {
-//                     for glyph in run.glyphs.iter_mut() {
-//                         if (glyph.position.x - glyph_pos * force_width).abs() > px(1.) {
-//                             glyph.position.x = glyph_pos * force_width;
-//                         }
-//                         glyph_pos += 1;
-//                     }
-//                 }
-//             }
+            let mut offset = 0;
+            for (run_idx, run) in runs.iter().enumerate().filter(|(_idx, run)| run.len > 0) {
+                builder.push(
+                    StyleProperty::FontStack(FontStack::List(std::borrow::Cow::Owned(vec![
+                        FontFamily::Generic(GenericFamily::UiMonospace),
+                    ]))),
+                    offset..offset + run.len,
+                );
 
-//             let key = Arc::new(CacheKey {
-//                 text,
-//                 font_size,
-//                 runs: SmallVec::from(runs),
-//                 wrap_width: None,
-//                 force_width,
-//             });
-//             let layout = Arc::new(layout);
-//             current_frame.lines.insert(key.clone(), layout.clone());
-//             current_frame.used_lines.push(key);
-//             layout
-//         }
-//     }
-// }
+                builder.push(
+                    StyleProperty::FontWeight(parley::FontWeight::new(f32::from_bits(
+                        run.font_weight,
+                    ))),
+                    offset..offset + run.len,
+                );
 
-// /// A run of text with a single font.
-// #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-// pub struct FontRun {
-//     pub(crate) len: usize,
-//     pub(crate) font_id: FontId,
-// }
+                builder.push(
+                    StyleProperty::FontStyle(match run.font_style {
+                        FontStyle::Normal => parley::FontStyle::Normal,
+                        FontStyle::Italic => parley::FontStyle::Italic,
+                        FontStyle::Oblique => parley::FontStyle::Oblique(None),
+                    }),
+                    offset..offset + run.len,
+                );
 
-// trait AsCacheKeyRef {
-//     fn as_cache_key_ref(&self) -> CacheKeyRef<'_>;
-// }
+                // Handle styles outside of parley to allow color changes without relayouting
+                builder.push(StyleProperty::Brush(run_idx), offset..offset + run.len);
+            }
 
-// #[derive(Clone, Debug, Eq)]
-// struct CacheKey {
-//     text: SharedString,
-//     font_size: Pixels,
-//     runs: SmallVec<[FontRun; 1]>,
-//     wrap_width: Option<Pixels>,
-//     force_width: Option<Pixels>,
-// }
+            let mut layout = builder.build(&text);
+            layout.break_all_lines(wrap_width.map(|px| px.0));
+            let layout = Arc::new(layout);
 
-// #[derive(Copy, Clone, PartialEq, Eq, Hash)]
-// struct CacheKeyRef<'a> {
-//     text: &'a str,
-//     font_size: Pixels,
-//     runs: &'a [FontRun],
-//     wrap_width: Option<Pixels>,
-//     force_width: Option<Pixels>,
-// }
+            let key = Arc::new(CacheKey {
+                text,
+                font_size,
+                line_height,
+                runs: SmallVec::from(runs),
+                wrap_width,
+                force_width: None,
+            });
 
-// impl PartialEq for dyn AsCacheKeyRef + '_ {
-//     fn eq(&self, other: &dyn AsCacheKeyRef) -> bool {
-//         self.as_cache_key_ref() == other.as_cache_key_ref()
-//     }
-// }
+            let mut current_frame = self.current_frame.write();
+            current_frame.layouts.insert(key.clone(), layout.clone());
+            current_frame.used_layouts.push(key);
 
-// impl Eq for dyn AsCacheKeyRef + '_ {}
+            layout
+        }
+    }
 
-// impl Hash for dyn AsCacheKeyRef + '_ {
-//     fn hash<H: Hasher>(&self, state: &mut H) {
-//         self.as_cache_key_ref().hash(state)
-//     }
-// }
+    // pub fn layout_wrapped_line<Text>(
+    //     &self,
+    //     text: Text,
+    //     font_size: Pixels,
+    //     runs: &[FontRun],
+    //     wrap_width: Option<Pixels>,
+    //     max_lines: Option<usize>,
+    // ) -> Arc<WrappedLineLayout>
+    // where
+    //     Text: AsRef<str>,
+    //     SharedString: From<Text>,
+    // {
+    //     let key = &CacheKeyRef {
+    //         text: text.as_ref(),
+    //         font_size,
+    //         runs,
+    //         wrap_width,
+    //         force_width: None,
+    //     } as &dyn AsCacheKeyRef;
 
-// impl AsCacheKeyRef for CacheKey {
-//     fn as_cache_key_ref(&self) -> CacheKeyRef<'_> {
-//         CacheKeyRef {
-//             text: &self.text,
-//             font_size: self.font_size,
-//             runs: self.runs.as_slice(),
-//             wrap_width: self.wrap_width,
-//             force_width: self.force_width,
-//         }
-//     }
-// }
+    //     let current_frame = self.current_frame.upgradable_read();
+    //     if let Some(layout) = current_frame.wrapped_lines.get(key) {
+    //         return layout.clone();
+    //     }
 
-// impl PartialEq for CacheKey {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.as_cache_key_ref().eq(&other.as_cache_key_ref())
-//     }
-// }
+    //     let previous_frame_entry = self.previous_frame.lock().wrapped_lines.remove_entry(key);
+    //     if let Some((key, layout)) = previous_frame_entry {
+    //         let mut current_frame = RwLockUpgradableReadGuard::upgrade(current_frame);
+    //         current_frame
+    //             .wrapped_lines
+    //             .insert(key.clone(), layout.clone());
+    //         current_frame.used_wrapped_lines.push(key);
+    //         layout
+    //     } else {
+    //         drop(current_frame);
+    //         let text = SharedString::from(text);
+    //         let unwrapped_layout = self.layout_line::<&SharedString>(&text, font_size, runs, None);
+    //         let wrap_boundaries = if let Some(wrap_width) = wrap_width {
+    //             unwrapped_layout.compute_wrap_boundaries(text.as_ref(), wrap_width, max_lines)
+    //         } else {
+    //             SmallVec::new()
+    //         };
+    //         let layout = Arc::new(WrappedLineLayout {
+    //             unwrapped_layout,
+    //             wrap_boundaries,
+    //             wrap_width,
+    //         });
+    //         let key = Arc::new(CacheKey {
+    //             text,
+    //             font_size,
+    //             runs: SmallVec::from(runs),
+    //             wrap_width,
+    //             force_width: None,
+    //         });
 
-// impl Hash for CacheKey {
-//     fn hash<H: Hasher>(&self, state: &mut H) {
-//         self.as_cache_key_ref().hash(state);
-//     }
-// }
+    //         let mut current_frame = self.current_frame.write();
+    //         current_frame
+    //             .wrapped_lines
+    //             .insert(key.clone(), layout.clone());
+    //         current_frame.used_wrapped_lines.push(key);
 
-// impl<'a> Borrow<dyn AsCacheKeyRef + 'a> for Arc<CacheKey> {
-//     fn borrow(&self) -> &(dyn AsCacheKeyRef + 'a) {
-//         self.as_ref() as &dyn AsCacheKeyRef
-//     }
-// }
+    //         layout
+    //     }
+    // }
 
-// impl AsCacheKeyRef for CacheKeyRef<'_> {
-//     fn as_cache_key_ref(&self) -> CacheKeyRef<'_> {
-//         *self
-//     }
-// }
+    // pub fn layout_line<Text>(
+    //     &self,
+    //     text: Text,
+    //     font_size: Pixels,
+    //     runs: &[FontRun],
+    //     force_width: Option<Pixels>,
+    // ) -> Arc<LineLayout>
+    // where
+    //     Text: AsRef<str>,
+    //     SharedString: From<Text>,
+    // {
+    //     let key = &CacheKeyRef {
+    //         text: text.as_ref(),
+    //         font_size,
+    //         runs,
+    //         wrap_width: None,
+    //         force_width,
+    //     } as &dyn AsCacheKeyRef;
+
+    //     let current_frame = self.current_frame.upgradable_read();
+    //     if let Some(layout) = current_frame.lines.get(key) {
+    //         return layout.clone();
+    //     }
+
+    //     let mut current_frame = RwLockUpgradableReadGuard::upgrade(current_frame);
+    //     if let Some((key, layout)) = self.previous_frame.lock().lines.remove_entry(key) {
+    //         current_frame.lines.insert(key.clone(), layout.clone());
+    //         current_frame.used_lines.push(key);
+    //         layout
+    //     } else {
+    //         let text = SharedString::from(text);
+    //         let mut layout = self
+    //             .platform_text_system
+    //             .layout_line(&text, font_size, runs);
+
+    //         if let Some(force_width) = force_width {
+    //             let mut glyph_pos = 0;
+    //             for run in layout.runs.iter_mut() {
+    //                 for glyph in run.glyphs.iter_mut() {
+    //                     if (glyph.position.x - glyph_pos * force_width).abs() > px(1.) {
+    //                         glyph.position.x = glyph_pos * force_width;
+    //                     }
+    //                     glyph_pos += 1;
+    //                 }
+    //             }
+    //         }
+
+    //         let key = Arc::new(CacheKey {
+    //             text,
+    //             font_size,
+    //             runs: SmallVec::from(runs),
+    //             wrap_width: None,
+    //             force_width,
+    //         });
+    //         let layout = Arc::new(layout);
+    //         current_frame.lines.insert(key.clone(), layout.clone());
+    //         current_frame.used_lines.push(key);
+    //         layout
+    //     }
+    // }
+}
+
+/// A run of text with a single font.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct FontRun {
+    pub(crate) len: usize,
+    pub(crate) font_id: FontId,
+    /// The font weight, as the bits of an f32
+    pub(crate) font_weight: u32,
+    pub(crate) font_style: FontStyle,
+}
+
+trait AsCacheKeyRef {
+    fn as_cache_key_ref(&self) -> CacheKeyRef<'_>;
+}
+
+#[derive(Clone, Debug, Eq)]
+struct CacheKey {
+    text: SharedString,
+    font_size: Pixels,
+    line_height: Pixels,
+    runs: SmallVec<[FontRun; 1]>,
+    wrap_width: Option<Pixels>,
+    force_width: Option<Pixels>,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+struct CacheKeyRef<'a> {
+    text: &'a str,
+    font_size: Pixels,
+    line_height: Pixels,
+    runs: &'a [FontRun],
+    wrap_width: Option<Pixels>,
+    force_spacing: Option<Pixels>,
+}
+
+impl PartialEq for dyn AsCacheKeyRef + '_ {
+    fn eq(&self, other: &dyn AsCacheKeyRef) -> bool {
+        self.as_cache_key_ref() == other.as_cache_key_ref()
+    }
+}
+
+impl Eq for dyn AsCacheKeyRef + '_ {}
+
+impl Hash for dyn AsCacheKeyRef + '_ {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_cache_key_ref().hash(state)
+    }
+}
+
+impl AsCacheKeyRef for CacheKey {
+    fn as_cache_key_ref(&self) -> CacheKeyRef<'_> {
+        CacheKeyRef {
+            text: &self.text,
+            font_size: self.font_size,
+            line_height: self.line_height,
+            runs: self.runs.as_slice(),
+            wrap_width: self.wrap_width,
+            force_spacing: self.force_width,
+        }
+    }
+}
+
+impl PartialEq for CacheKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_cache_key_ref().eq(&other.as_cache_key_ref())
+    }
+}
+
+impl Hash for CacheKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_cache_key_ref().hash(state);
+    }
+}
+
+impl<'a> Borrow<dyn AsCacheKeyRef + 'a> for Arc<CacheKey> {
+    fn borrow(&self) -> &(dyn AsCacheKeyRef + 'a) {
+        self.as_ref() as &dyn AsCacheKeyRef
+    }
+}
+
+impl AsCacheKeyRef for CacheKeyRef<'_> {
+    fn as_cache_key_ref(&self) -> CacheKeyRef<'_> {
+        *self
+    }
+}

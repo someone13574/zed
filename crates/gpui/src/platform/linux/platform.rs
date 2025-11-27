@@ -109,7 +109,7 @@ impl LinuxCommon {
         let (main_sender, main_receiver) = calloop::channel::channel::<RunnableVariant>();
 
         #[cfg(any(feature = "wayland", feature = "x11"))]
-        let text_system = Arc::new(crate::CosmicTextSystem::new());
+        let text_system = Arc::new(crate::SwashTextSystem::new());
         #[cfg(not(any(feature = "wayland", feature = "x11")))]
         let text_system = Arc::new(crate::NoopTextSystem::new());
 
