@@ -3297,6 +3297,7 @@ impl Window {
             std::slice::from_raw_parts((instance_data as *const T) as *const u8, size_of::<T>())
         };
 
+        let data_range = self.next_frame.scene.push_shader_data(instance_data);
         self.next_frame.scene.insert_primitive(ShaderInstance {
             order: 0,
             shader_id,
@@ -3307,7 +3308,7 @@ impl Window {
                 content_mask,
                 opacity: self.element_opacity,
             },
-            data: SmallVec::from_slice(instance_data),
+            data_range,
         });
         Ok(())
     }
