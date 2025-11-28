@@ -7,6 +7,7 @@ mod line_wrapper;
 use collections::FxHashMap;
 pub use font_fallbacks::*;
 pub use font_features::*;
+use itertools::Itertools;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use parley::{
     Alignment, AlignmentOptions, FontContext, FontData, FontWidth, GenericFamily, Layout,
@@ -19,12 +20,12 @@ use smallvec::SmallVec;
 use swash::{FontRef, Metrics};
 
 use crate::{
-    Bounds, DevicePixels, Hsla, Pixels, PlatformTextSystem, Point, Result, SharedString, Size,
+    App, Bounds, DevicePixels, Hsla, Pixels, PlatformTextSystem, Point, Result, SharedString, Size,
     StrikethroughStyle, TextAlign, UnderlineStyle, Window, bounds, fill, point, px, size,
     text_system::line_layout::{FontRun, LineLayoutCache},
 };
 use core::fmt;
-use derive_more::{Add, Deref, FromStr, Sub};
+use derive_more::{Add, Deref, DerefMut, FromStr, Sub};
 pub(crate) use line_layout::LayoutIndex;
 use std::{
     fmt::{Debug, Display, Formatter},
@@ -476,6 +477,64 @@ impl WindowTextSystem {
     //     );
     // }
 
+    /// Shape the given line, at the given font_size, for painting to the screen.
+    /// Subsets of the line can be styled independently with the `runs` parameter.
+    ///
+    /// Note that this method can only shape a single line of text. It will panic
+    /// if the text contains newlines. If you need to shape multiple lines of text,
+    /// use [`Self::shape_text`] instead.
+    pub fn shape_line(
+        &self,
+        text: SharedString,
+        font_size: Pixels,
+        runs: &[TextRun],
+        force_spacing: Option<Pixels>,
+    ) -> ShapedLine {
+        debug_assert!(
+            text.find('\n').is_none(),
+            "text argument should not contain newlines"
+        );
+
+        let mut font_runs = self.font_runs_pool.lock().pop().unwrap_or_default();
+        font_runs.clear();
+
+        for run in runs {
+            font_runs.push(FontRun {
+                len: run.len,
+                font_id: FontId(0, 0),
+                font_weight: run.font.weight.0.to_bits(),
+                font_style: run.font.style,
+            });
+        }
+
+        let layout = self.line_layout_cache.layout_text(
+            text.clone(),
+            font_size,
+            None,
+            &font_runs,
+            None,
+            &self.font_ctx,
+            &self.layout_ctx,
+        );
+
+        ShapedLine {
+            shaped_text: ShapedText {
+                layout,
+                brushes: runs
+                    .into_iter()
+                    .map(|run| Brush {
+                        color: run.color,
+                        background: run.background_color,
+                        underline: run.underline,
+                        strikethrough: run.strikethrough,
+                    })
+                    .collect(),
+                text,
+            },
+            force_spacing,
+        }
+    }
+
     /// Shape a multi line string of text, at the given font_size, for painting to the screen.
     /// Subsets of the text can be styled independently with the `runs` parameter.
     /// If `wrap_width` is provided, the line breaks will be adjusted to fit within the given width.
@@ -503,10 +562,9 @@ impl WindowTextSystem {
         let layout = self.line_layout_cache.layout_text(
             text.clone(),
             font_size,
-            line_height,
+            Some(line_height),
             &font_runs,
             wrap_width,
-            None,
             &self.font_ctx,
             &self.layout_ctx,
         );
@@ -523,7 +581,6 @@ impl WindowTextSystem {
                 })
                 .collect(),
             text,
-            line_height,
         }
 
         // let mut layout_ctx = self.layout_ctx.lock();
@@ -587,7 +644,7 @@ impl WindowTextSystem {
     }
 
     pub(crate) fn finish_frame(&self) {
-        // self.line_layout_cache.finish_frame()
+        self.line_layout_cache.finish_frame()
     }
 
     // /// Layout the given line of text, at the given font_size.
@@ -656,6 +713,48 @@ struct Brush {
     strikethrough: Option<StrikethroughStyle>,
 }
 
+/// A line of text that has been shaped and decorated.
+#[derive(Deref, DerefMut)]
+pub struct ShapedLine {
+    #[deref]
+    #[deref_mut]
+    shaped_text: ShapedText,
+    force_spacing: Option<Pixels>,
+}
+
+impl ShapedLine {
+    /// The index for the character at the given x coordinate
+    pub fn index_for_x(&self, x: Pixels) -> Option<usize> {
+        self.shaped_text
+            .index_for_position(point(x, px(self.shaped_text.layout.height() / 2.0)))
+    }
+
+    /// closest_index_for_x returns the character boundary closest to the given x coordinate
+    /// (e.g. to handle aligning up/down arrow keys)
+    pub fn closest_index_for_x(&self, x: Pixels) -> usize {
+        self.shaped_text
+            .closest_index_for_position(point(x, px(self.shaped_text.layout.height() / 2.0)))
+    }
+
+    /// The x position of the character at the given index
+    pub fn x_for_index(&self, index: usize) -> Pixels {
+        self.shaped_text.position_for_index(index).x
+    }
+
+    /// Paint the line of text to the window.
+    pub fn paint(
+        &self,
+        origin: Point<Pixels>,
+        line_height: Pixels,
+        window: &mut Window,
+        _cx: &mut App,
+    ) -> Result<()> {
+        self.shaped_text
+            .paint_inner(origin, Some(line_height), self.force_spacing, window);
+        Ok(())
+    }
+}
+
 /// Text which has been shaped and laid-out
 #[derive(Clone)]
 pub struct ShapedText {
@@ -663,7 +762,6 @@ pub struct ShapedText {
     brushes: SmallVec<[Brush; 4]>,
     /// The text that was shaped
     pub text: SharedString,
-    line_height: Pixels,
 }
 
 impl ShapedText {
@@ -704,7 +802,8 @@ impl ShapedText {
             return None;
         }
 
-        let line_idx = ((position.y / self.line_height).floor() as usize).min(line_count - 1);
+        let line_height = self.layout.get(0).unwrap().metrics().line_height;
+        let line_idx = ((position.y.0 / line_height).floor() as usize).min(line_count - 1);
         let line = self.layout.get(line_idx)?;
 
         for item in line.items() {
@@ -735,8 +834,9 @@ impl ShapedText {
             return self.text.len();
         }
 
+        let line_height = self.layout.get(0).unwrap().metrics().line_height;
         let line_idx =
-            ((position.y / self.line_height).floor() as usize).min(self.layout.lines().count());
+            ((position.y.0 / line_height).floor() as usize).min(self.layout.lines().count());
         let Some(line) = self.layout.get(line_idx) else {
             return self.text.len();
         };
@@ -814,10 +914,30 @@ impl ShapedText {
 
     /// Paints the text to the window
     pub fn paint(&self, origin: Point<Pixels>, window: &mut Window) {
-        let bounds = Bounds::new(
-            origin,
-            size(self.layout.width().into(), self.layout.height().into()),
-        );
+        self.paint_inner(origin, None, None, window)
+    }
+
+    fn paint_inner(
+        &self,
+        mut origin: Point<Pixels>,
+        line_height_override: Option<Pixels>,
+        _force_spacing: Option<Pixels>,
+        window: &mut Window,
+    ) {
+        let bounds = if let Some(line_height_override) = line_height_override {
+            assert!(self.layout.len() == 1);
+
+            let height_delta =
+                line_height_override - px(self.layout.get(0).unwrap().metrics().line_height);
+            origin.y += height_delta / 2.0;
+
+            Bounds::new(
+                origin,
+                size(self.layout.width().into(), line_height_override),
+            )
+        } else {
+            Bounds::new(origin, self.size())
+        };
 
         window.paint_layer(bounds, |window| {
             for (line_idx, line) in self.layout.lines().enumerate() {
@@ -839,9 +959,12 @@ impl ShapedText {
                                         origin
                                             + point(
                                                 px(glyph_run.offset()),
-                                                self.line_height * line_idx,
+                                                px(line.metrics().line_height) * line_idx,
                                             ),
-                                        size(glyph_run.advance().into(), self.line_height),
+                                        size(
+                                            glyph_run.advance().into(),
+                                            px(line.metrics().line_height),
+                                        ),
                                     ),
                                     bg,
                                 ));

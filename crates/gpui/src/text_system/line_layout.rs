@@ -485,10 +485,9 @@ impl LineLayoutCache {
         &self,
         text: SharedString,
         font_size: Pixels,
-        line_height: Pixels,
+        line_height: Option<Pixels>,
         runs: &[FontRun],
         wrap_width: Option<Pixels>,
-        force_spacing: Option<Pixels>,
         font_ctx: &Mutex<FontContext>,
         layout_ctx: &Mutex<LayoutContext<usize>>,
     ) -> Arc<Layout<usize>> {
@@ -498,7 +497,6 @@ impl LineLayoutCache {
             line_height,
             runs,
             wrap_width,
-            force_spacing,
         } as &dyn AsCacheKeyRef;
 
         let current_frame = self.current_frame.upgradable_read();
@@ -520,9 +518,13 @@ impl LineLayoutCache {
 
             let mut builder = layout_ctx.ranged_builder(&mut font_ctx, text.as_ref(), 1.0, false);
             builder.push_default(StyleProperty::FontSize(font_size.0));
-            builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(
-                line_height.0, // TODO_parley: allow metrics here
-            )));
+            builder.push_default(StyleProperty::LineHeight(
+                if let Some(line_height) = line_height {
+                    LineHeight::Absolute(line_height.0)
+                } else {
+                    LineHeight::MetricsRelative(1.0)
+                },
+            ));
 
             let mut offset = 0;
             for (run_idx, run) in runs.iter().enumerate().filter(|(_idx, run)| run.len > 0) {
@@ -549,7 +551,6 @@ impl LineLayoutCache {
                     offset..offset + run.len,
                 );
 
-                // Handle styles outside of parley to allow color changes without relayouting
                 builder.push(StyleProperty::Brush(run_idx), offset..offset + run.len);
             }
 
@@ -563,7 +564,6 @@ impl LineLayoutCache {
                 line_height,
                 runs: SmallVec::from(runs),
                 wrap_width,
-                force_width: None,
             });
 
             let mut current_frame = self.current_frame.write();
@@ -719,20 +719,18 @@ trait AsCacheKeyRef {
 struct CacheKey {
     text: SharedString,
     font_size: Pixels,
-    line_height: Pixels,
+    line_height: Option<Pixels>,
     runs: SmallVec<[FontRun; 1]>,
     wrap_width: Option<Pixels>,
-    force_width: Option<Pixels>,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 struct CacheKeyRef<'a> {
     text: &'a str,
     font_size: Pixels,
-    line_height: Pixels,
+    line_height: Option<Pixels>,
     runs: &'a [FontRun],
     wrap_width: Option<Pixels>,
-    force_spacing: Option<Pixels>,
 }
 
 impl PartialEq for dyn AsCacheKeyRef + '_ {
@@ -757,7 +755,6 @@ impl AsCacheKeyRef for CacheKey {
             line_height: self.line_height,
             runs: self.runs.as_slice(),
             wrap_width: self.wrap_width,
-            force_spacing: self.force_width,
         }
     }
 }

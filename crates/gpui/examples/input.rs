@@ -4,7 +4,7 @@ use gpui::{
     App, Application, Bounds, ClipboardItem, Context, CursorStyle, ElementId, ElementInputHandler,
     Entity, EntityInputHandler, FocusHandle, Focusable, GlobalElementId, KeyBinding, Keystroke,
     LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
-    ShapedText, SharedString, Style, TextRun, UTF16Selection, UnderlineStyle, Window, WindowBounds,
+    ShapedLine, SharedString, Style, TextRun, UTF16Selection, UnderlineStyle, Window, WindowBounds,
     WindowOptions, actions, black, div, fill, hsla, opaque_grey, point, prelude::*, px, relative,
     rgb, rgba, size, white, yellow,
 };
@@ -37,7 +37,7 @@ struct TextInput {
     selected_range: Range<usize>,
     selection_reversed: bool,
     marked_range: Option<Range<usize>>,
-    last_layout: Option<ShapedText>,
+    last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
     is_selecting: bool,
 }
@@ -178,7 +178,7 @@ impl TextInput {
         if position.y > bounds.bottom() {
             return self.content.len();
         }
-        line.closest_index_for_position(position - bounds.origin)
+        line.closest_index_for_x(position.x - bounds.left())
     }
 
     fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
@@ -360,11 +360,11 @@ impl EntityInputHandler for TextInput {
         let range = self.range_from_utf16(&range_utf16);
         Some(Bounds::from_corners(
             point(
-                bounds.left() + last_layout.position_for_index(range.start).x,
+                bounds.left() + last_layout.x_for_index(range.start),
                 bounds.top(),
             ),
             point(
-                bounds.left() + last_layout.position_for_index(range.end).x,
+                bounds.left() + last_layout.x_for_index(range.end),
                 bounds.bottom(),
             ),
         ))
@@ -380,7 +380,7 @@ impl EntityInputHandler for TextInput {
         let last_layout = self.last_layout.as_ref()?;
 
         assert_eq!(last_layout.text, self.content);
-        let utf8_index = last_layout.index_for_position(point - line_point)?;
+        let utf8_index = last_layout.index_for_x(point.x - line_point.x)?;
         Some(self.offset_to_utf16(utf8_index))
     }
 }
@@ -390,7 +390,7 @@ struct TextElement {
 }
 
 struct PrepaintState {
-    line: Option<ShapedText>,
+    line: Option<ShapedLine>,
     cursor: Option<PaintQuad>,
     selection: Option<PaintQuad>,
 }
@@ -485,18 +485,11 @@ impl Element for TextElement {
         };
 
         let font_size = style.font_size.to_pixels(window.rem_size());
-        let line = window.text_system().shape_text(
-            display_text,
-            font_size,
-            style
-                .line_height
-                .to_pixels(font_size.into(), window.rem_size()),
-            &runs,
-            None,
-            None,
-        );
+        let line = window
+            .text_system()
+            .shape_line(display_text, font_size, &runs, Some(px(20.0)));
 
-        let cursor_pos = line.position_for_index(cursor).x;
+        let cursor_pos = line.x_for_index(cursor);
         let (selection, cursor) = if selected_range.is_empty() {
             (
                 None,
@@ -513,11 +506,11 @@ impl Element for TextElement {
                 Some(fill(
                     Bounds::from_corners(
                         point(
-                            bounds.left() + line.position_for_index(selected_range.start).x,
+                            bounds.left() + line.x_for_index(selected_range.start),
                             bounds.top(),
                         ),
                         point(
-                            bounds.left() + line.position_for_index(selected_range.end).x,
+                            bounds.left() + line.x_for_index(selected_range.end),
                             bounds.bottom(),
                         ),
                     ),
@@ -553,7 +546,8 @@ impl Element for TextElement {
             window.paint_quad(selection)
         }
         let line = prepaint.line.take().unwrap();
-        line.paint(bounds.origin, window);
+        line.paint(bounds.origin, window.line_height(), window, cx)
+            .unwrap();
 
         if focus_handle.is_focused(window)
             && let Some(cursor) = prepaint.cursor.take()
