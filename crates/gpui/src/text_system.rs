@@ -7,7 +7,6 @@ mod line_wrapper;
 use collections::FxHashMap;
 pub use font_fallbacks::*;
 pub use font_features::*;
-use itertools::Itertools;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use parley::{
     Alignment, AlignmentOptions, Cluster, FontContext, FontData, FontWidth, GenericFamily, Layout,
@@ -16,8 +15,8 @@ use parley::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use skrifa::{FontRef, MetadataProvider, metrics::Metrics, prelude::LocationRef};
 use smallvec::SmallVec;
-use swash::{FontRef, Metrics};
 
 use crate::{
     App, Bounds, DevicePixels, Hsla, Pixels, PlatformTextSystem, Point, Result, SharedString, Size,
@@ -61,7 +60,7 @@ pub struct TextSystem {
     resolved_fonts: RwLock<FxHashMap<FontId, FontData>>,
     // font_ids_by_font: RwLock<FxHashMap<Font, Result<FontId>>>,
     // font_metrics: RwLock<FxHashMap<FontId, FontMetrics>>,
-    font_metrics: RwLock<FxHashMap<FontId, Metrics>>,
+    font_metrics: RwLock<FxHashMap<(FontId, Pixels), Metrics>>,
     raster_bounds: RwLock<FxHashMap<RenderGlyphParams, Bounds<DevicePixels>>>,
     // wrapper_pool: Mutex<FxHashMap<FontIdWithSize, Vec<LineWrapper>>>,
     font_runs_pool: Mutex<Vec<Vec<FontRun>>>,
@@ -234,26 +233,44 @@ impl TextSystem {
     }
 
     fn font_metrics(&self, font_id: FontId, font_size: Pixels) -> Metrics {
-        if let Some(&metrics) = self.font_metrics.read().get(&font_id) {
-            return metrics.scale(font_size.0);
+        // TODO_parley: cache the unscaled metrics, scale on use
+        if let Some(&metrics) = self.font_metrics.read().get(&(font_id, font_size)) {
+            return metrics;
         }
 
         let resolved_fonts = self.resolved_fonts.read();
         let font = resolved_fonts.get(&font_id).unwrap();
-        let font_ref = FontRef::from_index(font.data.data(), font.index as usize).unwrap();
-        let metrics = font_ref.metrics(&[]);
-        self.font_metrics.write().insert(font_id, metrics);
-        metrics.scale(font_size.0)
+        let font_ref = FontRef::from_index(font.data.data(), font.index).unwrap();
+        let metrics = font_ref.metrics(
+            skrifa::prelude::Size::new(font_size.0),
+            LocationRef::default(),
+        );
+        self.font_metrics
+            .write()
+            .insert((font_id, font_size), metrics);
+        metrics
+
+        // if let Some(&metrics) = self.font_metrics.read().get(&font_id) {
+        //     return metrics.scale(font_size.0);
+        // }
+
+        // let resolved_fonts = self.resolved_fonts.read();
+        // let font = resolved_fonts.get(&font_id).unwrap();
+        // let font_ref = FontRef::from_index(font.data.data(), font.index as usize).unwrap();
+        // let metrics = font_ref.metrics(&[]);
+        // self.font_metrics.write().insert(font_id, metrics);
+        // metrics.scale(font_size.0)
     }
 
     /// Get the bounding box for the given font and font size.
     /// A font's bounding box is the smallest rectangle that could enclose all glyphs
     /// in the font. superimposed over one another.
     pub fn bounding_box(&self, font_id: FontId, font_size: Pixels) -> Bounds<Pixels> {
-        let metrics = self.font_metrics(font_id, font_size); // TODO_parley: do this correctly (need to make swash expose bbox)
-        bounds(
-            point(px(0.0), px(0.0)),
-            size(px(metrics.max_width), px(metrics.ascent + metrics.descent)),
+        let metrics = self.font_metrics(font_id, font_size);
+        let bbox = metrics.bounds.unwrap();
+        Bounds::from_corners(
+            point(px(bbox.x_min), px(bbox.y_min)),
+            point(px(bbox.x_max), px(bbox.y_max)),
         )
         // self.read_metrics(font_id, |metrics| metrics.bounding_box(font_size))
     }
@@ -267,20 +284,32 @@ impl TextSystem {
     ) -> Result<Bounds<Pixels>> {
         let resolved_fonts = self.resolved_fonts.read();
         let font = resolved_fonts.get(&font_id).unwrap();
-        let font_ref = FontRef::from_index(font.data.data(), font.index as usize).unwrap();
-        let metrics = font_ref.glyph_metrics(&[]).scale(font_size.0);
-        let glyph_id = font_ref.charmap().map(ch);
+        let font_ref = FontRef::from_index(font.data.data(), font.index).unwrap();
+        let metrics = font_ref.glyph_metrics(
+            skrifa::prelude::Size::new(font_size.0),
+            LocationRef::default(),
+        );
+        let glyph_id = font_ref.charmap().map(ch).unwrap();
+        let bbox = metrics.bounds(glyph_id).unwrap();
 
-        Ok(bounds(
-            point(
-                px(metrics.lsb(glyph_id)), // this isn't quite right https://github.com/servo/font-kit/blob/868f28a2c60d36092be66e4d83db001267c9d6b4/src/loaders/freetype.rs#L605C16-L605C76
-                px(metrics.tsb(glyph_id) - metrics.advance_height(glyph_id)),
-            ),
-            size(
-                px(metrics.advance_width(glyph_id)),
-                px(metrics.advance_height(glyph_id)),
-            ),
+        Ok(Bounds::from_corners(
+            point(px(bbox.x_min), px(bbox.y_min)),
+            point(px(bbox.x_max), px(bbox.y_max)),
         ))
+
+        // let metrics = font_ref.glyph_metrics(&[]).scale(font_size.0);
+        // let glyph_id = font_ref.charmap().map(ch);
+
+        // Ok(bounds(
+        //     point(
+        //         px(metrics.lsb(glyph_id)), // this isn't quite right https://github.com/servo/font-kit/blob/868f28a2c60d36092be66e4d83db001267c9d6b4/src/loaders/freetype.rs#L605C16-L605C76
+        //         px(metrics.tsb(glyph_id) - metrics.advance_height(glyph_id)),
+        //     ),
+        //     size(
+        //         px(metrics.advance_width(glyph_id)),
+        //         px(metrics.advance_height(glyph_id)),
+        //     ),
+        // ))
 
         // let glyph_id = self
         //     .platform_text_system
@@ -298,13 +327,16 @@ impl TextSystem {
     pub fn advance(&self, font_id: FontId, font_size: Pixels, ch: char) -> Result<Size<Pixels>> {
         let resolved_fonts = self.resolved_fonts.read();
         let font = resolved_fonts.get(&font_id).unwrap();
-        let font_ref = FontRef::from_index(font.data.data(), font.index as usize).unwrap();
-        let metrics = font_ref.glyph_metrics(&[]).scale(font_size.0);
-        let glyph_id = font_ref.charmap().map(ch);
+        let font_ref = FontRef::from_index(font.data.data(), font.index).unwrap();
+        let metrics = font_ref.glyph_metrics(
+            skrifa::prelude::Size::new(font_size.0),
+            LocationRef::default(),
+        );
+        let glyph_id = font_ref.charmap().map(ch).unwrap();
 
         Ok(size(
-            px(metrics.advance_width(glyph_id)),
-            px(metrics.advance_height(glyph_id)),
+            px(metrics.advance_width(glyph_id).unwrap()),
+            px(metrics.bounds(glyph_id).unwrap().y_max - metrics.bounds(glyph_id).unwrap().y_min),
         ))
         // let glyph_id = self
         //     .platform_text_system
@@ -358,13 +390,19 @@ impl TextSystem {
 
     /// Get the height of a capital letter in the given font and size.
     pub fn cap_height(&self, font_id: FontId, font_size: Pixels) -> Pixels {
-        self.font_metrics(font_id, font_size).cap_height.into()
+        self.font_metrics(font_id, font_size)
+            .cap_height
+            .unwrap()
+            .into()
         // self.read_metrics(font_id, |metrics| metrics.cap_height(font_size))
     }
 
     /// Get the height of the x character in the given font and size.
     pub fn x_height(&self, font_id: FontId, font_size: Pixels) -> Pixels {
-        self.font_metrics(font_id, font_size).x_height.into()
+        self.font_metrics(font_id, font_size)
+            .x_height
+            .unwrap()
+            .into()
         // self.read_metrics(font_id, |metrics| metrics.x_height(font_size))
     }
 

@@ -141,6 +141,7 @@ pin-project = "1.1.10"
 circular-buffer.workspace = true
 spin = "0.10.0"
 parley = "0.6.0"
+skrifa = "0.39.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block = "0.1"
