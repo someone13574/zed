@@ -1,0 +1,22 @@
+[package]
+name = "gpui_macos"
+version = "0.2.2"
+edition.workspace = true
+authors = ["Nathan Sobo <nathan@zed.dev>"]
+description = "Zed's GPU-accelerated UI framework - MacOS Backend"
+repository = "https://github.com/zed-industries/zed"
+publish = true
+license = "Apache-2.0"
+homepage = "https://gpui.rs"
+keywords = ["desktop", "gui", "immediate"]
+categories = ["gui"]
+
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+gpui_core.workspace = true
