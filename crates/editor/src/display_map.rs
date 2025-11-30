@@ -43,9 +43,7 @@ pub use inlay_map::{InlayOffset, InlayPoint};
 pub use invisibles::{is_invisible, replacement};
 
 use collections::{HashMap, HashSet};
-use gpui::{
-    App, Context, Entity, Font, HighlightStyle, LineLayout, Pixels, ShapedText, UnderlineStyle,
-};
+use gpui::{App, Context, Entity, Font, HighlightStyle, Pixels, ShapedLine, UnderlineStyle};
 use language::{Point, Subscription as BufferSubscription, language_settings::language_settings};
 use multi_buffer::{
     Anchor, AnchorRangeExt, MultiBuffer, MultiBufferOffset, MultiBufferOffsetUtf16,
@@ -1077,7 +1075,7 @@ impl DisplaySnapshot {
             visible_rows: _,
             vertical_scroll_margin: _,
         }: &TextLayoutDetails,
-    ) -> ShapedText {
+    ) -> ShapedLine {
         let mut runs = Vec::new();
         let mut line = String::new();
 
@@ -1105,17 +1103,7 @@ impl DisplaySnapshot {
         }
 
         let font_size = editor_style.text.font_size.to_pixels(*rem_size);
-        text_system.shape_text(
-            SharedString::new(line),
-            font_size,
-            editor_style
-                .text
-                .line_height
-                .to_pixels(font_size.into(), *rem_size),
-            &runs,
-            None,
-            None,
-        )
+        text_system.shape_line(SharedString::new(line), font_size, &runs, None)
     }
 
     pub fn x_for_display_point(
@@ -1124,7 +1112,7 @@ impl DisplaySnapshot {
         text_layout_details: &TextLayoutDetails,
     ) -> Pixels {
         let line = self.layout_row(display_point.row(), text_layout_details);
-        line.position_for_index(display_point.column() as usize).x
+        line.x_for_index(display_point.column() as usize)
     }
 
     pub fn display_column_for_x(
@@ -1134,7 +1122,7 @@ impl DisplaySnapshot {
         details: &TextLayoutDetails,
     ) -> u32 {
         let layout_line = self.layout_row(display_row, details);
-        layout_line.closest_index_for_position(gpui::point(x, px(0.0))) as u32
+        layout_line.closest_index_for_x(x) as u32
     }
 
     pub fn grapheme_at(&self, mut point: DisplayPoint) -> Option<SharedString> {

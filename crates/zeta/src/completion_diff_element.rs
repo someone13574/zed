@@ -141,33 +141,33 @@ impl Element for CompletionDiffElement {
         window: &mut Window,
         cx: &mut App,
     ) {
-        if let Some(position) = self.text_layout.position_for_index(self.cursor_offset) {
-            let bounds = self.text_layout.bounds();
-            let line_height = self.text_layout.line_height();
-            let line_width = self
-                .text_layout
-                .line_layout_for_index(self.cursor_offset)
-                .map_or(bounds.size.width, |layout| layout.width());
-            window.paint_quad(quad(
-                Bounds::new(
-                    point(bounds.origin.x, position.y),
-                    size(cmp::max(bounds.size.width, line_width), line_height),
-                ),
-                Corners::default(),
-                cx.theme().colors().editor_active_line_background,
-                Edges::default(),
-                Hsla::transparent_black(),
-                BorderStyle::default(),
-            ));
-            self.element.paint(window, cx);
-            window.paint_quad(quad(
-                Bounds::new(position, size(px(2.), line_height)),
-                Corners::default(),
-                cx.theme().players().local().cursor,
-                Edges::default(),
-                Hsla::transparent_black(),
-                BorderStyle::default(),
-            ));
-        }
+        //     if let Some(position) = self.text_layout.position_for_index(self.cursor_offset) {
+        //         let bounds = self.text_layout.bounds();
+        //         let line_height = self.text_layout.line_height();
+        //         let line_width = self
+        //             .text_layout
+        //             .line_layout_for_index(self.cursor_offset)
+        //             .map_or(bounds.size.width, |layout| layout.width());
+        //         window.paint_quad(quad(
+        //             Bounds::new(
+        //                 point(bounds.origin.x, position.y),
+        //                 size(cmp::max(bounds.size.width, line_width), line_height),
+        //             ),
+        //             Corners::default(),
+        //             cx.theme().colors().editor_active_line_background,
+        //             Edges::default(),
+        //             Hsla::transparent_black(),
+        //             BorderStyle::default(),
+        //         ));
+        //         self.element.paint(window, cx);
+        //         window.paint_quad(quad(
+        //             Bounds::new(position, size(px(2.), line_height)),
+        //             Corners::default(),
+        //             cx.theme().players().local().cursor,
+        //             Edges::default(),
+        //             Hsla::transparent_black(),
+        //             BorderStyle::default(),
+        //         ));
+        //     }
     }
 }

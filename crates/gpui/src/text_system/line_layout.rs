@@ -527,10 +527,11 @@ impl LineLayoutCache {
             ));
 
             let mut offset = 0;
-            for (run_idx, run) in runs.iter().enumerate().filter(|(_idx, run)| run.len > 0) {
+            for (run_idx, run) in runs.iter().filter(|run| run.len > 0).enumerate() {
                 builder.push(
                     StyleProperty::FontStack(FontStack::List(std::borrow::Cow::Owned(vec![
-                        FontFamily::Generic(GenericFamily::UiMonospace),
+                        FontFamily::Named(std::borrow::Cow::Borrowed(run.font_family.as_str())),
+                        FontFamily::Generic(GenericFamily::SystemUi),
                     ]))),
                     offset..offset + run.len,
                 );
@@ -552,6 +553,7 @@ impl LineLayoutCache {
                 );
 
                 builder.push(StyleProperty::Brush(run_idx), offset..offset + run.len);
+                offset += run.len;
             }
 
             let mut layout = builder.build(&text);
@@ -702,10 +704,10 @@ impl LineLayoutCache {
 }
 
 /// A run of text with a single font.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct FontRun {
     pub(crate) len: usize,
-    pub(crate) font_id: FontId,
+    pub(crate) font_family: SharedString,
     /// The font weight, as the bits of an f32
     pub(crate) font_weight: u32,
     pub(crate) font_style: FontStyle,

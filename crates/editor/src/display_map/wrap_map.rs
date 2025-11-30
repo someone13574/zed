@@ -4,7 +4,7 @@ use super::{
     fold_map::{Chunk, FoldRows},
     tab_map::{self, TabEdit, TabPoint, TabSnapshot},
 };
-use gpui::{App, AppContext as _, Context, Entity, Font, LineWrapper, Pixels, Task};
+use gpui::{App, AppContext as _, Context, Entity, Font, Pixels, Task};
 use language::Point;
 use multi_buffer::{MultiBufferSnapshot, RowInfo};
 use smol::future::yield_now;
@@ -1060,7 +1060,7 @@ impl Transform {
         static WRAP_TEXT: LazyLock<String> = LazyLock::new(|| {
             let mut wrap_text = String::new();
             wrap_text.push('\n');
-            wrap_text.extend((0..LineWrapper::MAX_INDENT as usize).map(|_| ' '));
+            wrap_text.extend((0..4 as usize).map(|_| ' '));
             wrap_text
         });
 
@@ -1222,7 +1222,7 @@ mod tests {
         display_map::{fold_map::FoldMap, inlay_map::InlayMap, tab_map::TabMap},
         test::test_font,
     };
-    use gpui::{LineFragment, px, test::observe};
+    use gpui::{px, test::observe};
     use rand::prelude::*;
     use settings::SettingsStore;
     use smol::stream::StreamExt;
@@ -1276,7 +1276,7 @@ mod tests {
         let tabs_snapshot = tab_map.set_max_expansion_column(32);
         log::info!("TabMap text: {:?}", tabs_snapshot.text());
 
-        let mut line_wrapper = text_system.line_wrapper(font.clone(), font_size);
+        // let mut line_wrapper = text_system.line_wrapper(font.clone(), font_size);
         // let expected_text = wrap_text(&tabs_snapshot, wrap_width, &mut line_wrapper);
         let expected_text = String::new();
 

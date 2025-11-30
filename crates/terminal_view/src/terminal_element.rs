@@ -4,9 +4,9 @@ use gpui::{
     Element, ElementId, Entity, FocusHandle, Font, FontFeatures, FontStyle, FontWeight,
     GlobalElementId, HighlightStyle, Hitbox, Hsla, InputHandler, InteractiveElement, Interactivity,
     IntoElement, LayoutId, Length, ModifiersChangedEvent, MouseButton, MouseMoveEvent, Pixels,
-    Point, ShapedLine, ShapedText, StatefulInteractiveElement, StrikethroughStyle, Styled, TextRun,
-    TextStyle, UTF16Selection, UnderlineStyle, WeakEntity, WhiteSpace, Window, div, fill, point,
-    px, relative, size,
+    Point, ShapedLine, StatefulInteractiveElement, StrikethroughStyle, Styled, TextRun, TextStyle,
+    UTF16Selection, UnderlineStyle, WeakEntity, WhiteSpace, Window, div, fill, point, px, relative,
+    size,
 };
 use itertools::Itertools;
 use language::CursorShape;
@@ -26,7 +26,7 @@ use terminal::{
     terminal_settings::TerminalSettings,
 };
 use theme::{ActiveTheme, Theme, ThemeSettings};
-use ui::{DefiniteLength, utils::ensure_minimum_contrast};
+use ui::utils::ensure_minimum_contrast;
 use ui::{ParentElement, Tooltip};
 use util::ResultExt;
 use workspace::Workspace;
@@ -143,18 +143,15 @@ impl BatchedTextRun {
             origin.y + self.start_point.line as f32 * dimensions.line_height,
         );
 
-        let font_size = self.font_size.to_pixels(window.rem_size());
-        window
+        let _ = window
             .text_system()
-            .shape_text(
+            .shape_line(
                 self.text.clone().into(),
-                font_size,
-                dimensions.line_height,
+                self.font_size.to_pixels(window.rem_size()),
                 std::slice::from_ref(&self.style),
                 Some(dimensions.cell_width),
-                None,
             )
-            .paint(pos, window);
+            .paint(pos, dimensions.line_height, window, cx);
     }
 }
 
@@ -499,13 +496,13 @@ impl TerminalElement {
     fn shape_cursor(
         cursor_point: DisplayCursor,
         size: TerminalBounds,
-        text_fragment: &ShapedText,
+        text_fragment: &ShapedLine,
     ) -> Option<(Point<Pixels>, Pixels)> {
         if cursor_point.line() < size.total_lines() as i32 {
-            let cursor_width = if text_fragment.size().width == Pixels::ZERO {
+            let cursor_width = if text_fragment.width == Pixels::ZERO {
                 size.cell_width()
             } else {
-                text_fragment.size().width
+                text_fragment.width
             };
 
             // Cursor should always surround as much of the text as possible,
@@ -1106,23 +1103,18 @@ impl Element for TerminalElement {
                     None
                 } else {
                     let cursor_point = DisplayCursor::from(cursor.point, display_offset);
-                    let font_size = text_style.font_size.to_pixels(window.rem_size());
                     let cursor_text = {
                         let str_trxt = cursor_char.to_string();
                         let len = str_trxt.len();
-                        window.text_system().shape_text(
+                        window.text_system().shape_line(
                             str_trxt.into(),
-                            font_size,
-                            text_style
-                                .line_height
-                                .to_pixels(font_size.into(), window.rem_size()),
+                            text_style.font_size.to_pixels(window.rem_size()),
                             &[TextRun {
                                 len,
                                 font: text_style.font(),
                                 color: theme.colors().terminal_ansi_background,
                                 ..Default::default()
                             }],
-                            None,
                             None,
                         )
                     };
@@ -1322,10 +1314,9 @@ impl Element for TerminalElement {
                                     wavy: false,
                                 });
 
-                                let shaped_line = window.text_system().shape_text(
+                                let shaped_line = window.text_system().shape_line(
                                     text_to_mark.clone().into(),
                                     ime_style.font_size.to_pixels(window.rem_size()),
-                                    layout.dimensions.line_height,
                                     &[TextRun {
                                         len: text_to_mark.len(),
                                         font: ime_style.font(),
@@ -1333,11 +1324,11 @@ impl Element for TerminalElement {
                                         underline: ime_style.underline,
                                         ..Default::default()
                                     }],
-                                    None,
                                     None
                                 );
                                 shaped_line
-                                    .paint(ime_position, window);
+                                    .paint(ime_position, layout.dimensions.line_height, window, cx)
+                                    .log_err();
                             }
 
                     if self.cursor_visible && marked_text_cloned.is_none()

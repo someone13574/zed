@@ -1376,9 +1376,9 @@ fn load_embedded_fonts(cx: &App) {
         }
     }));
 
-    // cx.text_system()
-    // .add_fonts(embedded_fonts.into_inner())
-    // .unwrap();
+    cx.text_system()
+        .add_fonts(embedded_fonts.into_inner())
+        .unwrap();
 }
 
 /// Spawns a background task to load the user themes from the themes directory.

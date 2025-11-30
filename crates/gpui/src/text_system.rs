@@ -10,9 +10,9 @@ pub use font_features::*;
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use parley::{
-    Alignment, AlignmentOptions, FontContext, FontData, FontWidth, GenericFamily, Layout,
-    LayoutContext, PositionedLayoutItem,
-    fontique::{Attributes, QueryFamily, QueryStatus},
+    Alignment, AlignmentOptions, Cluster, FontContext, FontData, FontWidth, GenericFamily, Layout,
+    LayoutContext, PositionedLayoutItem, Run,
+    fontique::{Attributes, Blob, QueryFamily, QueryStatus},
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -28,6 +28,7 @@ use core::fmt;
 use derive_more::{Add, Deref, DerefMut, FromStr, Sub};
 pub(crate) use line_layout::LayoutIndex;
 use std::{
+    borrow::Cow,
     fmt::{Debug, Display, Formatter},
     hash::{Hash, Hasher},
     ops::Range,
@@ -96,8 +97,15 @@ impl TextSystem {
     }
 
     /// Get a list of all available font names from the operating system.
+    /// TODO_parley: how to filter out variants based on weight?
     pub fn all_font_names(&self) -> Vec<String> {
-        todo!()
+        let mut font_ctx = self.font_ctx.lock();
+        font_ctx
+            .collection
+            .family_names()
+            .map(|family| family.to_string())
+            .collect()
+
         // let mut names = self.platform_text_system.all_font_names();
         // names.extend(
         //     self.fallback_font_stack
@@ -108,6 +116,17 @@ impl TextSystem {
         // names.sort();
         // names.dedup();
         // names
+    }
+
+    /// Add a font's data to the text system.
+    pub fn add_fonts(&self, fonts: Vec<Cow<'static, [u8]>>) -> Result<()> {
+        let mut font_ctx = self.font_ctx.lock();
+        for font in fonts {
+            font_ctx
+                .collection
+                .register_fonts(Blob::new(Arc::new(font)), None);
+        }
+        Ok(())
     }
 
     /// Add a font's data to the text system.
@@ -168,7 +187,7 @@ impl TextSystem {
         let mut query = collection.query(source_cache);
         query.set_families([
             QueryFamily::Named(&font.family),
-            QueryFamily::Generic(GenericFamily::UiMonospace),
+            QueryFamily::Generic(GenericFamily::SystemUi),
         ]);
         query.set_attributes(Attributes {
             width: FontWidth::NORMAL,
@@ -301,7 +320,7 @@ impl TextSystem {
     ///
     /// Uses the width of the `m` character in the given font and size.
     pub fn em_width(&self, font_id: FontId, font_size: Pixels) -> Result<Pixels> {
-        Ok(self.advance(font_id, font_size, 'm')?.width)
+        Ok(self.typographic_bounds(font_id, font_size, 'm')?.size.width)
         // Ok(self.typographic_bounds(font_id, font_size, 'm')?.size.width)
     }
 
@@ -317,7 +336,7 @@ impl TextSystem {
     ///
     /// Uses the width of the `0` character in the given font and size.
     pub fn ch_width(&self, font_id: FontId, font_size: Pixels) -> Result<Pixels> {
-        Ok(self.advance(font_id, font_size, '0')?.width)
+        Ok(self.typographic_bounds(font_id, font_size, '0')?.size.width)
         // Ok(self.typographic_bounds(font_id, font_size, '0')?.size.width)
     }
 
@@ -501,7 +520,7 @@ impl WindowTextSystem {
         for run in runs {
             font_runs.push(FontRun {
                 len: run.len,
-                font_id: FontId(0, 0),
+                font_family: run.font.family.clone(),
                 font_weight: run.font.weight.0.to_bits(),
                 font_style: run.font.style,
             });
@@ -517,11 +536,12 @@ impl WindowTextSystem {
             &self.layout_ctx,
         );
 
-        ShapedLine {
+        let mut shaped_line = ShapedLine {
             shaped_text: ShapedText {
                 layout,
                 brushes: runs
                     .into_iter()
+                    .filter(|run| run.len > 0)
                     .map(|run| Brush {
                         color: run.color,
                         background: run.background_color,
@@ -529,10 +549,14 @@ impl WindowTextSystem {
                         strikethrough: run.strikethrough,
                     })
                     .collect(),
+                force_spacing,
+                len: text.len(),
                 text,
+                width: px(0.0),
             },
-            force_spacing,
-        }
+        };
+        shaped_line.width = shaped_line.size().width; // account for forced-spacing
+        shaped_line
     }
 
     /// Shape a multi line string of text, at the given font_size, for painting to the screen.
@@ -553,7 +577,7 @@ impl WindowTextSystem {
         for run in runs {
             font_runs.push(FontRun {
                 len: run.len,
-                font_id: FontId(0, 0),
+                font_family: run.font.family.clone(),
                 font_weight: run.font.weight.0.to_bits(),
                 font_style: run.font.style,
             });
@@ -569,10 +593,12 @@ impl WindowTextSystem {
             &self.layout_ctx,
         );
 
+        let width = px(layout.width());
         ShapedText {
             layout,
             brushes: runs
                 .into_iter()
+                .filter(|run| run.len > 0)
                 .map(|run| Brush {
                     color: run.color,
                     background: run.background_color,
@@ -580,7 +606,10 @@ impl WindowTextSystem {
                     strikethrough: run.strikethrough,
                 })
                 .collect(),
+            force_spacing: None,
+            len: text.len(),
             text,
+            width,
         }
 
         // let mut layout_ctx = self.layout_ctx.lock();
@@ -714,15 +743,21 @@ struct Brush {
 }
 
 /// A line of text that has been shaped and decorated.
-#[derive(Deref, DerefMut)]
+#[derive(Clone, Deref, DerefMut)]
 pub struct ShapedLine {
     #[deref]
     #[deref_mut]
     shaped_text: ShapedText,
-    force_spacing: Option<Pixels>,
 }
 
 impl ShapedLine {
+    /// TODO_parly ref https://github.com/zed-industries/zed/pull/20841
+    pub fn with_len(&self, len: usize) -> Self {
+        let mut new = self.clone();
+        new.len = len;
+        new
+    }
+
     /// The index for the character at the given x coordinate
     pub fn index_for_x(&self, x: Pixels) -> Option<usize> {
         self.shaped_text
@@ -738,7 +773,9 @@ impl ShapedLine {
 
     /// The x position of the character at the given index
     pub fn x_for_index(&self, index: usize) -> Pixels {
-        self.shaped_text.position_for_index(index).x
+        self.shaped_text
+            .position_for_index(index)
+            .map_or(self.width, |position| position.x)
     }
 
     /// Paint the line of text to the window.
@@ -750,7 +787,7 @@ impl ShapedLine {
         _cx: &mut App,
     ) -> Result<()> {
         self.shaped_text
-            .paint_inner(origin, Some(line_height), self.force_spacing, window);
+            .paint_inner(origin, Some(line_height), window);
         Ok(())
     }
 }
@@ -760,14 +797,27 @@ impl ShapedLine {
 pub struct ShapedText {
     layout: Arc<Layout<usize>>,
     brushes: SmallVec<[Brush; 4]>,
+    force_spacing: Option<Pixels>,
     /// The text that was shaped
     pub text: SharedString,
+    /// TODO_parley: remove?
+    pub width: Pixels,
+    /// TODO_parley: remove?
+    pub len: usize,
 }
 
 impl ShapedText {
     /// The size of the whole wrapped text. This can span multiple lines if there are multiple wrap boundaries.
     pub fn size(&self) -> Size<Pixels> {
-        size(self.layout.width().into(), self.layout.height().into())
+        if let Some(force_spacing) = self.force_spacing {
+            let line = self.layout.get(0).unwrap();
+            size(
+                force_spacing * line.runs().map(|run| run.clusters().count()).sum::<usize>(),
+                self.layout.height().into(),
+            )
+        } else {
+            size(self.layout.width().into(), self.layout.height().into())
+        }
     }
 
     /// Sets the alignment of the shaped text within a container
@@ -784,11 +834,15 @@ impl ShapedText {
                 align_when_overflowing: true,
             },
         );
+
+        self.width = self.size().width;
     }
 
     /// TODO_parly ref https://github.com/zed-industries/zed/pull/20841
-    pub fn with_len(&self, _len: usize) -> Self {
-        self.clone()
+    pub fn with_len(&self, len: usize) -> Self {
+        let mut new = self.clone();
+        new.len = len;
+        new
     }
 
     /// The utf8 byte-index for the character at the given coordinates
@@ -811,14 +865,12 @@ impl ShapedText {
                 continue;
             };
 
-            let mut offset = px(glyph_run.offset());
-            for cluster in glyph_run.run().clusters() {
-                let next = offset + cluster.advance().into();
-                if position.x < next {
+            for (cluster, offset, advance) in
+                Self::iter_clusters(px(glyph_run.offset()), glyph_run.run(), self.force_spacing)
+            {
+                if position.x < offset + advance {
                     return Some(cluster.text_range().start);
                 }
-
-                offset = next;
             }
         }
 
@@ -847,15 +899,14 @@ impl ShapedText {
                 continue;
             };
 
-            let mut offset = px(glyph_run.offset());
-            for cluster in glyph_run.run().clusters() {
-                if position.x < offset + px(cluster.advance() / 2.0) {
+            for (cluster, offset, advance) in
+                Self::iter_clusters(px(glyph_run.offset()), glyph_run.run(), self.force_spacing)
+            {
+                if position.x < offset + advance / 2.0 {
                     return cluster.text_range().start;
                 } else {
                     last = cluster.text_range().end;
                 }
-
-                offset += cluster.advance().into();
             }
         }
 
@@ -863,31 +914,25 @@ impl ShapedText {
     }
 
     /// The position of the character at the given utf8 byte-index
-    pub fn position_for_index(&self, index: usize) -> Point<Pixels> {
-        let mut last = px(self.layout.width());
+    pub fn position_for_index(&self, index: usize) -> Option<Point<Pixels>> {
         for line in self.layout.lines() {
             for item in line.items() {
                 let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
                     continue;
                 };
 
-                let mut origin = point(px(glyph_run.offset()), px(glyph_run.baseline()));
-                for cluster in glyph_run.run().clusters() {
-                    let next = origin.x + cluster.advance().into();
-
+                for (cluster, offset, _advance) in
+                    Self::iter_clusters(px(glyph_run.offset()), glyph_run.run(), self.force_spacing)
+                {
                     if cluster.text_range().contains(&index) {
-                        return origin;
-                    } else {
-                        last = next;
+                        // TODO_parley: Baseline probably isn't the best y
+                        return Some(point(offset, px(glyph_run.baseline())));
                     }
-
-                    origin.x = next;
                 }
             }
         }
 
-        // Can't return layout.width() directly since we need to account for trailing spaces
-        point(last, self.layout.height().into())
+        None
     }
 
     /// Something
@@ -914,14 +959,30 @@ impl ShapedText {
 
     /// Paints the text to the window
     pub fn paint(&self, origin: Point<Pixels>, window: &mut Window) {
-        self.paint_inner(origin, None, None, window)
+        self.paint_inner(origin, None, window)
+    }
+
+    fn iter_clusters<'a>(
+        offset: Pixels,
+        run: &'a Run<usize>,
+        force_spacing: Option<Pixels>,
+    ) -> impl Iterator<Item = (Cluster<'a, usize>, Pixels, Pixels)> {
+        run.visual_clusters().scan(offset, move |offset, cluster| {
+            let cluster_offset = *offset;
+            let advance = if let Some(force_spacing) = force_spacing {
+                force_spacing
+            } else {
+                cluster.advance().into()
+            };
+            *offset += advance;
+            Some((cluster, cluster_offset, advance))
+        })
     }
 
     fn paint_inner(
         &self,
         mut origin: Point<Pixels>,
         line_height_override: Option<Pixels>,
-        _force_spacing: Option<Pixels>,
         window: &mut Window,
     ) {
         let bounds = if let Some(line_height_override) = line_height_override {
@@ -981,7 +1042,12 @@ impl ShapedText {
                                     )
                                     .unwrap();
 
-                                glyph_origin.x += px(glyph.advance);
+                                // TODO_parley: upstream a way to do this correctly
+                                glyph_origin.x += if let Some(force_spacing) = self.force_spacing {
+                                    force_spacing
+                                } else {
+                                    px(glyph.advance)
+                                };
                             }
 
                             if let Some(underline) = brush.underline {
@@ -1013,6 +1079,14 @@ impl ShapedText {
                 }
             }
         });
+    }
+}
+
+impl Debug for ShapedLine {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ShapedLine")
+            .field("text", &self.text)
+            .finish()
     }
 }
 

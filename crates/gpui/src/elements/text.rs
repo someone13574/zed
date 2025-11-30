@@ -485,7 +485,22 @@ impl TextLayout {
 
     /// Get the byte index into the input of the pixel position.
     pub fn index_for_position(&self, mut position: Point<Pixels>) -> Result<usize, usize> {
-        todo!()
+        let element_state = self.0.borrow();
+        let element_state = element_state
+            .as_ref()
+            .expect("measurement has not been performed");
+        let bounds = element_state
+            .bounds
+            .expect("prepaint has not been performed");
+
+        if position.y < bounds.top() {
+            return Err(0);
+        }
+
+        element_state
+            .shaped_text
+            .index_for_position(position - bounds.origin)
+            .ok_or(element_state.shaped_text.text.len().saturating_sub(1))
 
         // let element_state = self.0.borrow();
         // let element_state = element_state
@@ -522,7 +537,17 @@ impl TextLayout {
 
     /// Get the pixel position for the given byte index.
     pub fn position_for_index(&self, index: usize) -> Option<Point<Pixels>> {
-        todo!()
+        let element_state = self.0.borrow();
+        let element_state = element_state
+            .as_ref()
+            .expect("measurement has not been performed");
+        let bounds = element_state
+            .bounds
+            .expect("prepaint has not been performed");
+        element_state
+            .shaped_text
+            .position_for_index(index)
+            .map(|position| position + bounds.origin)
 
         // let element_state = self.0.borrow();
         // let element_state = element_state
