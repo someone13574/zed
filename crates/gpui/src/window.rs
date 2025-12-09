@@ -3325,6 +3325,7 @@ impl Window {
                     .map_size(|size| size.ceil()),
                 content_mask,
                 opacity: self.element_opacity,
+                scale_factor,
             },
             data_range,
         });
