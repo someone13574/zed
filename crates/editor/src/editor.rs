@@ -7132,6 +7132,7 @@ impl Editor {
         Some((query, selection_anchor_range))
     }
 
+    #[ztracing::instrument(skip_all)]
     fn update_selection_occurrence_highlights(
         &mut self,
         query_text: String,
@@ -7276,6 +7277,7 @@ impl Editor {
         });
     }
 
+    #[ztracing::instrument(skip_all)]
     fn refresh_selected_text_highlights(
         &mut self,
         on_buffer_edit: bool,
