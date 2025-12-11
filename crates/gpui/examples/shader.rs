@@ -1,7 +1,7 @@
 use std::{f32::consts::PI, time::Duration};
 
 use gpui::{
-    AbsoluteLength, Animation, AnimationExt, App, AppContext, Application, Bounds, Context,
+    AbsoluteLength, Animation, AnimationExt, App, AppContext, Application, Bounds, Context, Edges,
     FragmentShader, IntoElement, Length, ParentElement, Radians, Render, RenderOnce, Rgba,
     ShaderUniform, Styled, Window, WindowBounds, WindowOptions, div, px, radians, relative, rgb,
     shader_element, shader_element_with_data, size,
@@ -108,12 +108,20 @@ impl Render for ShaderExample {
                     .cursor_crosshair(),
                 )
                 .child(
-                    shader_element(FragmentShader::new(
-                        "
-                    let bg = sample_background(position + vec2<f32>(30.0, 0.0), scale_factor);
+                    shader_element(
+                        FragmentShader::new(
+                            "
+                    let bg = sample_backdrop(position + vec2<f32>(30.0, 0.0), scale_factor);
                     return bg.bgra;
                     ",
-                    ))
+                        )
+                        .read_margin(Edges {
+                            top: px(0.0),
+                            right: px(30.0),
+                            bottom: px(0.0),
+                            left: px(-30.0),
+                        }),
+                    )
                     .absolute()
                     .w_full()
                     .h(relative(0.1)),
