@@ -742,6 +742,7 @@ impl ShaderInstanceBase {
 pub(crate) struct ShaderInstance {
     pub order: DrawOrder,
     pub shader_id: CustomShaderId,
+    pub read_bounds: Option<Bounds<ScaledPixels>>,
     pub base_data: ShaderInstanceBase,
     pub data_range: Range<usize>,
 }

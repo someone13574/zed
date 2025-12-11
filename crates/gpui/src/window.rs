@@ -3282,11 +3282,24 @@ impl Window {
         bounds: Bounds<Pixels>,
         main_body: SharedString,
         extra_items: SmallVec<[SharedString; 4]>,
+        read_enabled: bool,
+        read_margin: Option<Edges<Pixels>>,
         instance_data: &T,
     ) -> Result<(), (String, bool)> {
         self.invalidator.debug_assert_paint();
 
         let scale_factor = self.scale_factor();
+        let read_bounds = if read_enabled {
+            Some(
+                read_margin
+                    .map_or(self.bounds(), |margin| bounds.extend(margin))
+                    .scale(scale_factor)
+                    .map_origin(|origin| origin.floor())
+                    .map_size(|size| size.ceil()),
+            )
+        } else {
+            None
+        };
         let bounds = bounds.scale(scale_factor);
         let content_mask = self.content_mask().scale(scale_factor);
         let shader_id = self.platform_window.register_shader(CustomShaderInfo {
@@ -3296,6 +3309,7 @@ impl Window {
             data_definition: T::DEFINITION,
             data_size: size_of::<T>(),
             data_align: T::ALIGN,
+            backdrop_read: read_enabled,
         })?;
 
         let instance_data = unsafe {
@@ -3306,6 +3320,7 @@ impl Window {
         self.next_frame.scene.insert_primitive(ShaderInstance {
             order: 0,
             shader_id,
+            read_bounds,
             base_data: ShaderInstanceBase {
                 bounds: bounds
                     .map_origin(|origin| origin.floor())

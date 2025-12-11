@@ -3,9 +3,9 @@ use std::marker::PhantomData;
 use smallvec::SmallVec;
 
 use crate::{
-    App, Bounds, CursorStyle, Element, ElementId, GlobalElementId, Hitbox, InspectorElementId,
-    InteractiveElement, Interactivity, IntoElement, LayoutId, Pixels, SharedString,
-    StyleRefinement, Window, fill, point, rgb,
+    App, Bounds, CursorStyle, Edges, Element, ElementId, GlobalElementId, Hitbox,
+    InspectorElementId, InteractiveElement, Interactivity, IntoElement, LayoutId, Pixels,
+    SharedString, StyleRefinement, Window, fill, point, px, rgb,
 };
 
 /// A custom shader which can be drawn using [shader_element] or [shader_element_with_data].
@@ -13,6 +13,8 @@ use crate::{
 pub struct FragmentShader<T: ShaderUniform> {
     main_body: SharedString,
     extra_items: SmallVec<[SharedString; 4]>,
+    read_access: bool,
+    read_margin: Option<Edges<Pixels>>,
     _marker: PhantomData<T>,
 }
 
@@ -44,6 +46,8 @@ impl<T: ShaderUniform> FragmentShader<T> {
         Self {
             main_body: SharedString::new_static(main_body),
             extra_items: SmallVec::new(),
+            read_access: false,
+            read_margin: Some(Edges::all(px(0.0))),
             _marker: PhantomData,
         }
     }
@@ -51,6 +55,58 @@ impl<T: ShaderUniform> FragmentShader<T> {
     /// Adds a helper function or type to the shader code.
     pub fn with_item(mut self, item: &'static str) -> Self {
         self.extra_items.push(SharedString::new_static(item));
+        self
+    }
+
+    /// Gives this shader read access to the pixels within its bounds. You can
+    /// sample pixels using the `sample_backdrop` function, or by using
+    /// `t_backdrop` and `s_backdrop`.
+    ///
+    /// ```
+    /// /// Samples the pixel at `position` (in absolute logical pixels)
+    /// /// and returns the color in RGBA.
+    /// fn sample_backdrop(position: vec2<f32>, scale_factor: f32) -> vec4<f32>;
+    /// ```
+    ///
+    /// Sampling outside of the instance's bounds may result in unexpected behavior.
+    /// Use [FragmentShader::read_margin] and [FragmentShader::read_full] to
+    /// expand the valid area.
+    pub fn read_under(mut self) -> Self {
+        self.read_access = true;
+        self
+    }
+
+    /// Gives this shader read access to the pixels within its bounds + `margin`.
+    /// You can sample pixels using the `sample_backdrop` function, or by using
+    /// `t_backdrop` and `s_backdrop`.
+    ///
+    /// ```
+    /// /// Samples the pixel at `position` (in absolute logical pixels)
+    /// /// and returns the color in RGBA.
+    /// fn sample_backdrop(position: vec2<f32>, scale_factor: f32) -> vec4<f32>;
+    /// ```
+    ///
+    /// Sampling outside of valid area may result in unexpected behavior. Use
+    /// [FragmentShader::read_full] to give access to all pixels within the
+    /// window.
+    pub fn read_margin(mut self, margin: Edges<Pixels>) -> Self {
+        self.read_access = true;
+        self.read_margin = Some(margin);
+        self
+    }
+
+    /// Gives this shader read access to the pixels within the window.
+    /// You can sample pixels using the `sample_backdrop` function, or by using
+    /// `t_backdrop` and `s_backdrop`.
+    ///
+    /// ```
+    /// /// Samples the pixel at `position` (in absolute logical pixels)
+    /// /// and returns the color in RGBA.
+    /// fn sample_backdrop(position: vec2<f32>, scale_factor: f32) -> vec4<f32>;
+    /// ```
+    pub fn read_full(mut self) -> Self {
+        self.read_access = true;
+        self.read_margin = None;
         self
     }
 }
@@ -196,6 +252,8 @@ impl<T: ShaderUniform> Element for ShaderElement<T> {
                 bounds,
                 self.shader.main_body.clone(),
                 self.shader.extra_items.clone(),
+                self.shader.read_access,
+                self.shader.read_margin,
                 &self.data,
             ) {
                 Ok(_) => {}

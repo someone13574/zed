@@ -12,6 +12,7 @@ pub(crate) struct CustomShaderInfo {
     pub data_definition: Option<&'static str>,
     pub data_size: usize,
     pub data_align: usize,
+    pub backdrop_read: bool,
 }
 
 impl Display for CustomShaderInfo {
@@ -20,6 +21,19 @@ impl Display for CustomShaderInfo {
         let main_body = &self.main_body;
         let extra_items = self.extra_items.join("");
 
+        let backdrop_code = if self.backdrop_read {
+            "
+            var t_backdrop: texture_2d<f32>;
+            var s_backdrop: sampler;
+
+            fn sample_backdrop(position: vec2<f32>, scale_factor: f32) -> vec4<f32> {
+                let uv = position * scale_factor / globals.viewport_size;
+                return textureSample(t_backdrop, s_backdrop, uv);
+            }
+            "
+        } else {
+            ""
+        };
         let (instance_data_field, instance_data_param, instance_data_arg) = if self.data_size != 0 {
             (
                 format!("instance_data: {}", self.data_name),
@@ -40,8 +54,7 @@ impl Display for CustomShaderInfo {
         }}
 
         var<uniform> globals: GlobalParams;
-        var t_backdrop: texture_2d<f32>;
-        var s_backdrop: sampler;
+        {backdrop_code}
 
         fn to_device_position(unit_vertex: vec2<f32>, bounds: Bounds) -> vec2<f32> {{
             let position = unit_vertex * bounds.size + bounds.origin;
@@ -53,11 +66,6 @@ impl Display for CustomShaderInfo {
             let tl = position - clip_bounds.origin;
             let br = clip_bounds.origin + clip_bounds.size - position;
             return vec4<f32>(tl.x, br.x, tl.y, br.y);
-        }}
-
-        fn sample_background(position: vec2<f32>, scale_factor: f32) -> vec4<f32> {{
-            let uv = position * scale_factor / globals.viewport_size;
-            return textureSample(t_backdrop, s_backdrop, uv);
         }}
 
         struct Bounds {{
