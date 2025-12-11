@@ -40,6 +40,8 @@ impl Display for CustomShaderInfo {
         }}
 
         var<uniform> globals: GlobalParams;
+        var t_backdrop: texture_2d<f32>;
+        var s_backdrop: sampler;
 
         fn to_device_position(unit_vertex: vec2<f32>, bounds: Bounds) -> vec2<f32> {{
             let position = unit_vertex * bounds.size + bounds.origin;
@@ -51,6 +53,11 @@ impl Display for CustomShaderInfo {
             let tl = position - clip_bounds.origin;
             let br = clip_bounds.origin + clip_bounds.size - position;
             return vec4<f32>(tl.x, br.x, tl.y, br.y);
+        }}
+
+        fn sample_background(position: vec2<f32>, scale_factor: f32) -> vec4<f32> {{
+            let uv = position * scale_factor / globals.viewport_size;
+            return textureSample(t_backdrop, s_backdrop, uv);
         }}
 
         struct Bounds {{
