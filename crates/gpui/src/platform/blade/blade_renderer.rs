@@ -9,7 +9,7 @@ use crate::{
     PolychromeSprite, PrimitiveBatch, Quad, ScaledPixels, Scene, ShaderInstance, Shadow, Size,
     Underline, get_gamma_correction_ratios,
 };
-use blade_graphics::{self as gpu, ShaderData};
+use blade_graphics::{self as gpu, ShaderData, TexturePiece};
 use blade_util::{BufferBelt, BufferBeltDescriptor};
 use bytemuck::{Pod, Zeroable};
 #[cfg(target_os = "macos")]
@@ -106,6 +106,8 @@ struct ShaderPolySpritesData {
 struct ShaderCustomShaderData {
     globals: CustomShaderGlobalParams,
     b_instances: gpu::BufferPiece,
+    t_backdrop: gpu::TextureView,
+    s_backdrop: gpu::Sampler,
 }
 
 #[derive(blade_macros::ShaderData)]
@@ -427,6 +429,8 @@ pub struct BladeRenderer {
     path_intermediate_texture_view: gpu::TextureView,
     path_intermediate_msaa_texture: Option<gpu::Texture>,
     path_intermediate_msaa_texture_view: Option<gpu::TextureView>,
+    backdrop_texture: gpu::Texture,
+    backdrop_texture_view: gpu::TextureView,
     rendering_parameters: RenderingParameters,
 }
 
@@ -438,7 +442,7 @@ impl BladeRenderer {
     ) -> anyhow::Result<Self> {
         let surface_config = gpu::SurfaceConfig {
             size: config.size,
-            usage: gpu::TextureUsage::TARGET,
+            usage: gpu::TextureUsage::TARGET | gpu::TextureUsage::COPY,
             display_sync: gpu::DisplaySync::Recent,
             color_space: gpu::ColorSpace::Srgb,
             allow_exclusive_full_screen: false,
@@ -489,6 +493,13 @@ impl BladeRenderer {
             )
             .unzip();
 
+        let (backdrop_texture, backdrop_texture_view) = create_path_intermediate_texture(
+            &context.gpu,
+            surface.info().format,
+            config.size.width,
+            config.size.height,
+        );
+
         #[cfg(target_os = "macos")]
         let core_video_texture_cache = unsafe {
             CVMetalTextureCache::new(
@@ -513,6 +524,8 @@ impl BladeRenderer {
             path_intermediate_texture_view,
             path_intermediate_msaa_texture,
             path_intermediate_msaa_texture_view,
+            backdrop_texture,
+            backdrop_texture_view,
             rendering_parameters,
         })
     }
@@ -595,6 +608,17 @@ impl BladeRenderer {
                 .unzip();
             self.path_intermediate_msaa_texture = path_intermediate_msaa_texture;
             self.path_intermediate_msaa_texture_view = path_intermediate_msaa_texture_view;
+            self.gpu.destroy_texture(self.backdrop_texture);
+            self.gpu.destroy_texture_view(self.backdrop_texture_view);
+
+            let (backdrop_texture, backdrop_texture_view) = create_path_intermediate_texture(
+                &self.gpu,
+                self.surface.info().format,
+                gpu_size.width,
+                gpu_size.height,
+            );
+            self.backdrop_texture = backdrop_texture;
+            self.backdrop_texture_view = backdrop_texture_view;
         }
     }
 
@@ -725,6 +749,8 @@ impl BladeRenderer {
         if let Some(msaa_view) = self.path_intermediate_msaa_texture_view {
             self.gpu.destroy_texture_view(msaa_view);
         }
+        self.gpu.destroy_texture(self.backdrop_texture);
+        self.gpu.destroy_texture_view(self.backdrop_texture_view);
     }
 
     pub fn draw(&mut self, scene: &Scene) {
@@ -907,6 +933,36 @@ impl BladeRenderer {
                         .get(instances[0].shader_id.0 as usize)
                         .expect("Shader not registered");
 
+                    drop(pass);
+                    self.command_encoder
+                        .transfer("backdrop-copy")
+                        .copy_texture_to_texture(
+                            TexturePiece {
+                                texture: frame.texture(),
+                                mip_level: 0,
+                                array_layer: 0,
+                                origin: [0, 0, 0],
+                            },
+                            TexturePiece {
+                                texture: self.backdrop_texture,
+                                mip_level: 0,
+                                array_layer: 0,
+                                origin: [0, 0, 0],
+                            },
+                            self.surface_config.size,
+                        );
+                    pass = self.command_encoder.render(
+                        "main",
+                        gpu::RenderTargetSet {
+                            colors: &[gpu::RenderTarget {
+                                view: frame.texture_view(),
+                                init_op: gpu::InitOp::Load,
+                                finish_op: gpu::FinishOp::Store,
+                            }],
+                            depth_stencil: None,
+                        },
+                    );
+
                     let (_, instance_size) =
                         ShaderInstance::size_info(*instance_data_size, *instance_data_align);
                     let instance_buf = self
@@ -935,6 +991,8 @@ impl BladeRenderer {
                                 pad: 0,
                             },
                             b_instances: instance_buf,
+                            t_backdrop: self.backdrop_texture_view,
+                            s_backdrop: self.atlas_sampler,
                         },
                     );
                     encoder.draw(0, 4, 0, instances.len() as u32);

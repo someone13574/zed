@@ -107,6 +107,17 @@ impl Render for ShaderExample {
                     .size_40()
                     .cursor_crosshair(),
                 )
+                .child(
+                    shader_element(FragmentShader::new(
+                        "
+                    let bg = sample_background(position + vec2<f32>(30.0, 0.0), scale_factor);
+                    return bg.bgra;
+                    ",
+                    ))
+                    .absolute()
+                    .w_full()
+                    .h(relative(0.1)),
+                )
             },
         )
     }
