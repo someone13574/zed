@@ -1,7 +1,7 @@
 use std::{f32::consts::PI, time::Duration};
 
 use gpui::{
-    AbsoluteLength, Animation, AnimationExt, App, AppContext, Application, Bounds, Context, Edges,
+    AbsoluteLength, Animation, AnimationExt, App, AppContext, Application, Bounds, Context,
     FragmentShader, IntoElement, Length, ParentElement, Radians, Render, RenderOnce, Rgba,
     ShaderUniform, Styled, Window, WindowBounds, WindowOptions, div, px, radians, relative, rgb,
     shader_element, shader_element_with_data, size,
@@ -110,8 +110,8 @@ impl Render for ShaderExample {
                 .child(
                     div()
                         .child(Blur {
-                            radius: 31,
-                            sigma: 31.0 * 0.85,
+                            radius: 15,
+                            sigma: 15.0 * 0.85,
                         })
                         .absolute()
                         .w_full()
@@ -252,17 +252,23 @@ impl RenderOnce for Blur {
         let blur_shader = FragmentShader::new(
             "
             var result = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+            var sum = 0.0;
+
             for (var i = 0u; i < data.samples; i++) {
                 let offset = data.direction * vec2<f32>(data.offsets[i], data.offsets[i]);
+                let pos = position + offset;
                 let weight = data.weights[i];
 
-                result += sample_backdrop(position + offset, scale_factor) * weight;
+                if all(pos > bounds.origin) && all(pos < bounds.origin + bounds.size) {
+                    result += sample_backdrop(position + offset, scale_factor) * weight;
+                    sum += weight;
+                }
             }
 
-            return result;
+            return result / sum;
         ",
         )
-        .read_margin(Edges::all(px(self.radius as f32)));
+        .read_under();
 
         assert!(self.radius <= 31);
 
