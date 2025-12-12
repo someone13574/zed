@@ -123,6 +123,7 @@ pub(crate) struct MetalRenderer {
     path_intermediate_texture: Option<metal::Texture>,
     path_intermediate_msaa_texture: Option<metal::Texture>,
     path_sample_count: u32,
+    backdrop_texture: Option<metal::Texture>,
 }
 
 #[repr(C)]
@@ -292,6 +293,7 @@ impl MetalRenderer {
             path_intermediate_texture: None,
             path_intermediate_msaa_texture: None,
             path_sample_count: PATH_SAMPLE_COUNT,
+            backdrop_texture: None,
         }
     }
 
@@ -329,6 +331,7 @@ impl MetalRenderer {
             height: DevicePixels(size.height as i32),
         };
         self.update_path_intermediate_textures(device_pixels_size);
+        self.backdrop_texture = None;
     }
 
     fn update_path_intermediate_textures(&mut self, size: Size<DevicePixels>) {
@@ -599,14 +602,35 @@ impl MetalRenderer {
                     viewport_size,
                     command_encoder,
                 ),
-                PrimitiveBatch::Shaders(shaders) => self.draw_custom_shaders(
-                    shaders,
-                    &scene.shader_data,
-                    instance_buffer,
-                    &mut instance_offset,
-                    viewport_size,
-                    command_encoder,
-                ),
+                PrimitiveBatch::Shaders(shaders, read_bounds) => {
+                    if let Some(read_bounds) = read_bounds {
+                        command_encoder.end_encoding();
+                        self.copy_backdrop(
+                            drawable.texture(),
+                            read_bounds,
+                            viewport_size,
+                            command_buffer,
+                        );
+                        command_encoder = new_command_encoder(
+                            command_buffer,
+                            drawable,
+                            viewport_size,
+                            |color_attachment| {
+                                color_attachment.set_load_action(metal::MTLLoadAction::Load);
+                            },
+                        );
+                    }
+
+                    self.draw_custom_shaders(
+                        shaders,
+                        &scene.shader_data,
+                        read_bounds.is_some(),
+                        instance_buffer,
+                        &mut instance_offset,
+                        viewport_size,
+                        command_encoder,
+                    )
+                }
                 PrimitiveBatch::Surfaces(surfaces) => self.draw_surfaces(
                     surfaces,
                     instance_buffer,
@@ -1148,10 +1172,63 @@ impl MetalRenderer {
         true
     }
 
+    fn copy_backdrop(
+        &mut self,
+        src_texture: &metal::TextureRef,
+        read_bounds: Bounds<u32>,
+        viewport_size: Size<DevicePixels>,
+        command_buffer: &metal::CommandBufferRef,
+    ) {
+        if self.backdrop_texture.is_none() {
+            let desc = metal::TextureDescriptor::new();
+            desc.set_width(viewport_size.width.0 as u64);
+            desc.set_height(viewport_size.height.0 as u64);
+            desc.set_pixel_format(metal::MTLPixelFormat::BGRA8Unorm);
+            desc.set_usage(metal::MTLTextureUsage::ShaderRead);
+
+            self.backdrop_texture = Some(self.device.new_texture(&desc));
+        }
+
+        let bounds = read_bounds.intersect(&Bounds {
+            origin: Point { x: 0, y: 0 },
+            size: Size {
+                width: viewport_size.width.0 as u32,
+                height: viewport_size.height.0 as u32,
+            },
+        });
+
+        let blit_encoder = command_buffer.new_blit_command_encoder();
+        blit_encoder.copy_from_texture(
+            src_texture,
+            0,
+            0,
+            metal::MTLOrigin {
+                x: bounds.origin.x as u64,
+                y: bounds.origin.y as u64,
+                z: 0,
+            },
+            metal::MTLSize {
+                width: bounds.size.width as u64,
+                height: bounds.size.height as u64,
+                depth: 1,
+            },
+            self.backdrop_texture.as_ref().unwrap(),
+            0,
+            0,
+            metal::MTLOrigin {
+                x: bounds.origin.x as u64,
+                y: bounds.origin.y as u64,
+                z: 0,
+            },
+        );
+        blit_encoder.end_encoding();
+    }
+
     fn draw_custom_shaders(
         &mut self,
         instances: &[ShaderInstance],
         shader_data: &[u8],
+        read_backdrop: bool,
         instance_buffer: &mut InstanceBuffer,
         instance_offset: &mut usize,
         viewport_size: Size<DevicePixels>,
@@ -1221,6 +1298,13 @@ impl MetalRenderer {
                 shader_data,
                 *instance_data_size,
                 *instance_data_align,
+            );
+        }
+
+        if read_backdrop {
+            command_encoder.set_fragment_texture(
+                ShaderInputIndex::BackdropTexture as u64,
+                self.backdrop_texture.as_deref(),
             );
         }
 
@@ -1508,7 +1592,8 @@ enum SpriteInputIndex {
 enum ShaderInputIndex {
     Globals = 0,
     Instances = 1,
-    BufferSizes = 2,
+    BackdropTexture = 2,
+    BufferSizes = 3,
 }
 
 #[repr(C)]
