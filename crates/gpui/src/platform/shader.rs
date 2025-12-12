@@ -187,7 +187,8 @@ pub(super) fn naga_validate_custom_shader(
     for (_handle, global) in module.global_variables.iter_mut() {
         assert!(global.binding.is_none());
 
-        let binding = match global.name.as_ref().unwrap().as_str() {
+        let name = global.name.as_ref().unwrap().as_str();
+        let binding = match name {
             "globals" => 0,
             "b_instances" => 1,
             "t_backdrop" => 2,
@@ -196,16 +197,28 @@ pub(super) fn naga_validate_custom_shader(
         };
 
         global.binding = Some(ResourceBinding {
-            group: 0,
+            group: if name == "s_backdrop" { 1 } else { 0 },
             binding: binding as u32,
         });
         bindings.insert(
             global.binding.unwrap(),
             #[cfg(target_os = "macos")]
             naga::back::msl::BindTarget {
-                buffer: Some(binding as u8),
-                texture: None,
-                sampler: None,
+                buffer: if ["globals", "b_instances"].contains(&name) {
+                    Some(binding as u8)
+                } else {
+                    None
+                },
+                texture: if name == "t_backdrop" {
+                    Some(binding as u8)
+                } else {
+                    None
+                },
+                sampler: if name == "s_backdrop" {
+                    Some(naga::back::msl::BindSamplerTarget::Resource(binding as u8))
+                } else {
+                    None
+                },
                 mutable: false,
             },
             #[cfg(target_os = "windows")]
