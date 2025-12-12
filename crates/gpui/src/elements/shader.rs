@@ -4,17 +4,32 @@ use smallvec::SmallVec;
 
 use crate::{
     App, Bounds, CursorStyle, Edges, Element, ElementId, GlobalElementId, Hitbox,
-    InspectorElementId, InteractiveElement, Interactivity, IntoElement, LayoutId, Pixels,
-    SharedString, StyleRefinement, Window, fill, point, px, rgb,
+    InspectorElementId, InteractiveElement, Interactivity, IntoElement, LayoutId, Pixels, Point,
+    SharedString, StyleRefinement, Window, fill, point, rgb,
 };
+
+/// Determines which pixels a fragment shader can read from. If a shader accesses
+/// outside of the specified area, then the sampled color may be incorrect.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ShaderReadAccess {
+    /// Allows read access to the pixels within the instance's bounds.
+    /// Equivalent to `ShaderReadAccess::Around(Edges::all(px(0.0)))`
+    Under,
+
+    /// Allows read access to the pixels within the instance's bounds,
+    /// extended at each edge.
+    Around(Edges<Pixels>),
+
+    /// Allows read access to all pixels within the window.
+    Window,
+}
 
 /// A custom shader which can be drawn using [shader_element] or [shader_element_with_data].
 #[derive(Clone)]
 pub struct FragmentShader<T: ShaderUniform> {
     main_body: SharedString,
     extra_items: SmallVec<[SharedString; 4]>,
-    read_access: bool,
-    read_margin: Option<Edges<Pixels>>,
+    read_access: Option<ShaderReadAccess>,
     _marker: PhantomData<T>,
 }
 
@@ -46,8 +61,7 @@ impl<T: ShaderUniform> FragmentShader<T> {
         Self {
             main_body: SharedString::new_static(main_body),
             extra_items: SmallVec::new(),
-            read_access: false,
-            read_margin: Some(Edges::all(px(0.0))),
+            read_access: None,
             _marker: PhantomData,
         }
     }
@@ -58,55 +72,9 @@ impl<T: ShaderUniform> FragmentShader<T> {
         self
     }
 
-    /// Gives this shader read access to the pixels within its bounds. You can
-    /// sample pixels using the `sample_backdrop` function, or by using
-    /// `t_backdrop` and `s_backdrop`.
-    ///
-    /// ```
-    /// /// Samples the pixel at `position` (in absolute logical pixels)
-    /// /// and returns the color in RGBA.
-    /// fn sample_backdrop(position: vec2<f32>, scale_factor: f32) -> vec4<f32>;
-    /// ```
-    ///
-    /// Sampling outside of the instance's bounds may result in unexpected behavior.
-    /// Use [FragmentShader::read_margin] and [FragmentShader::read_full] to
-    /// expand the valid area.
-    pub fn read_under(mut self) -> Self {
-        self.read_access = true;
-        self
-    }
-
-    /// Gives this shader read access to the pixels within its bounds + `margin`.
-    /// You can sample pixels using the `sample_backdrop` function, or by using
-    /// `t_backdrop` and `s_backdrop`.
-    ///
-    /// ```
-    /// /// Samples the pixel at `position` (in absolute logical pixels)
-    /// /// and returns the color in RGBA.
-    /// fn sample_backdrop(position: vec2<f32>, scale_factor: f32) -> vec4<f32>;
-    /// ```
-    ///
-    /// Sampling outside of valid area may result in unexpected behavior. Use
-    /// [FragmentShader::read_full] to give access to all pixels within the
-    /// window.
-    pub fn read_margin(mut self, margin: Edges<Pixels>) -> Self {
-        self.read_access = true;
-        self.read_margin = Some(margin);
-        self
-    }
-
-    /// Gives this shader read access to the pixels within the window.
-    /// You can sample pixels using the `sample_backdrop` function, or by using
-    /// `t_backdrop` and `s_backdrop`.
-    ///
-    /// ```
-    /// /// Samples the pixel at `position` (in absolute logical pixels)
-    /// /// and returns the color in RGBA.
-    /// fn sample_backdrop(position: vec2<f32>, scale_factor: f32) -> vec4<f32>;
-    /// ```
-    pub fn read_full(mut self) -> Self {
-        self.read_access = true;
-        self.read_margin = None;
+    /// Sets which pixels can be read by this shader.
+    pub fn read_access(mut self, access: Option<ShaderReadAccess>) -> Self {
+        self.read_access = access;
         self
     }
 }
@@ -253,17 +221,21 @@ impl<T: ShaderUniform, const PASSES: usize> Element for ShaderElement<T, PASSES>
             |_style, window, _cx| match window.register_shader::<T>(
                 self.shader.main_body.clone(),
                 self.shader.extra_items.clone(),
-                self.shader.read_access,
+                self.shader.read_access.is_some(),
             ) {
                 Ok(shader_id) => {
+                    let read_bounds = match self.shader.read_access {
+                        Some(ShaderReadAccess::Under) => Some(bounds),
+                        Some(ShaderReadAccess::Around(edges)) => Some(bounds.extend(edges)),
+                        Some(ShaderReadAccess::Window) => Some(Bounds {
+                            origin: Point::default(),
+                            size: window.viewport_size,
+                        }),
+                        None => None,
+                    };
+
                     for pass_data in &self.data {
-                        window.paint_shader(
-                            shader_id,
-                            bounds,
-                            self.shader.read_access,
-                            self.shader.read_margin,
-                            pass_data,
-                        );
+                        window.paint_shader(shader_id, bounds, read_bounds, pass_data);
                     }
                 }
                 Err((msg, first_err)) => {

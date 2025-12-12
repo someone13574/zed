@@ -3279,34 +3279,18 @@ impl Window {
         &mut self,
         shader_id: CustomShaderId,
         bounds: Bounds<Pixels>,
-        read_enabled: bool,
-        read_margin: Option<Edges<Pixels>>,
+        read_bounds: Option<Bounds<Pixels>>,
         instance_data: &T,
     ) {
         self.invalidator.debug_assert_paint();
 
         let scale_factor = self.scale_factor();
-        let read_bounds = if read_enabled {
-            Some(
-                read_margin
-                    .map_or(
-                        Bounds {
-                            origin: Point {
-                                x: px(0.0),
-                                y: px(0.0),
-                            },
-                            size: self.viewport_size,
-                        },
-                        |margin| bounds.extend(margin),
-                    )
-                    .scale(scale_factor)
-                    .map_origin(|origin| origin.floor())
-                    .map_size(|size| size.ceil()),
-            )
-        } else {
-            None
-        };
-
+        let read_bounds = read_bounds.map(|read_bounds| {
+            read_bounds
+                .scale(scale_factor)
+                .map_origin(|origin| origin.floor())
+                .map_size(|size| size.ceil())
+        });
         let bounds = bounds.scale(scale_factor);
         let content_mask = self.content_mask().scale(scale_factor);
         let instance_data = unsafe {
