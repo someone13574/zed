@@ -82,6 +82,10 @@ struct DirectXResources {
     path_intermediate_msaa_texture: ID3D11Texture2D,
     path_intermediate_msaa_view: Option<ID3D11RenderTargetView>,
 
+    // Backdrop texture for custom shaders
+    backdrop_texture: Option<ID3D11Texture2D>,
+    backdrop_view: Option<ID3D11ShaderResourceView>,
+
     // Cached viewport
     viewport: D3D11_VIEWPORT,
 }
@@ -349,7 +353,7 @@ impl DirectXRenderer {
                     texture_id,
                     sprites,
                 } => self.draw_polychrome_sprites(texture_id, sprites),
-                PrimitiveBatch::Shaders(shaders) => self.draw_custom_shaders(shaders, &scene.shader_data),
+                PrimitiveBatch::Shaders(shaders, read_bounds) => self.draw_custom_shaders(shaders, read_bounds, &scene.shader_data),
                 PrimitiveBatch::Surfaces(surfaces) => self.draw_surfaces(surfaces),
             }
             .context(format!(
@@ -652,6 +656,7 @@ impl DirectXRenderer {
     fn draw_custom_shaders(
         &mut self,
         shaders: &[ShaderInstance],
+        read_bounds: Option<Bounds<u32>>,
         shader_data: &[u8],
     ) -> Result<()> {
         if shaders.is_empty() {
@@ -659,7 +664,7 @@ impl DirectXRenderer {
         }
 
         let devices = self.devices.as_ref().context("devices missing")?;
-        let resources = self.resources.as_ref().context("resources missing")?;
+        let resources = self.resources.as_mut().context("resources missing")?;
         let (pipeline, instance_data_size, instance_data_align) = self
             .pipelines
             .custom
@@ -704,6 +709,71 @@ impl DirectXRenderer {
                 *instance_data_align,
             );
             devices.device_context.Unmap(&pipeline.buffer, 0);
+        }
+
+        if let Some(read_bounds) = read_bounds {
+            if resources.backdrop_texture.is_none() {
+                unsafe {
+                    let desc = D3D11_TEXTURE2D_DESC {
+                        Width: self.width,
+                        Height: self.height,
+                        MipLevels: 1,
+                        ArraySize: 1,
+                        Format: RENDER_TARGET_FORMAT,
+                        SampleDesc: DXGI_SAMPLE_DESC {
+                            Count: 1,
+                            Quality: 0,
+                        },
+                        Usage: D3D11_USAGE_DEFAULT,
+                        BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
+                        CPUAccessFlags: 0,
+                        MiscFlags: 0,
+                    };
+                    devices
+                        .device
+                        .CreateTexture2D(&desc, None, Some(&mut resources.backdrop_texture))
+                        .unwrap();
+                    devices
+                        .device
+                        .CreateShaderResourceView(
+                            resources.backdrop_texture.as_ref().unwrap(),
+                            None,
+                            Some(&mut resources.backdrop_view),
+                        )
+                        .unwrap();
+                }
+            }
+
+            unsafe {
+                devices
+                    .device_context
+                    .PSSetShaderResources(2, Some(slice::from_ref(&resources.backdrop_view)));
+
+                let bounds = read_bounds.intersect(&Bounds {
+                    origin: Point::default(),
+                    size: Size {
+                        width: self.width,
+                        height: self.height,
+                    },
+                });
+                devices.device_context.CopySubresourceRegion(
+                    resources.backdrop_texture.as_ref().unwrap(),
+                    0,
+                    bounds.origin.x,
+                    bounds.origin.y,
+                    0,
+                    resources.render_target.as_ref().unwrap(),
+                    0,
+                    Some(&D3D11_BOX {
+                        left: bounds.origin.x,
+                        top: bounds.origin.y,
+                        front: 0,
+                        right: bounds.origin.x + bounds.size.width,
+                        bottom: bounds.origin.y + bounds.size.height,
+                        back: 1,
+                    }),
+                );
+            }
         }
 
         pipeline.draw(
@@ -817,6 +887,8 @@ impl DirectXResources {
             path_intermediate_msaa_texture,
             path_intermediate_msaa_view,
             path_intermediate_srv,
+            backdrop_texture: None,
+            backdrop_view: None,
             viewport,
         })
     }
@@ -843,6 +915,8 @@ impl DirectXResources {
         self.path_intermediate_msaa_texture = path_intermediate_msaa_texture;
         self.path_intermediate_msaa_view = path_intermediate_msaa_view;
         self.path_intermediate_srv = path_intermediate_srv;
+        self.backdrop_texture = None;
+        self.backdrop_view = None;
         self.viewport = viewport;
         Ok(())
     }
@@ -930,17 +1004,41 @@ impl DirectXRenderPipelines {
                 info.data_size,
                 info.data_align,
             )?;
+
             let mut hlsl = String::new();
             naga::back::hlsl::Writer::new(
                 &mut hlsl,
                 &naga::back::hlsl::Options {
+                    shader_model: naga::back::hlsl::ShaderModel::V5_0,
                     binding_map: bindings,
-                    fake_missing_bindings: false,
+                    fake_missing_bindings: true,
                     ..Default::default()
                 },
             )
             .write(&module, &module_info, None)
             .map_err(|err| err.to_string())?;
+
+            if info.backdrop_read {
+                // Replace naga's sampler heap, since naga doesn't properly support SM 5.0,
+                // but the shaders we are using only use a well known set of bindings, so we
+                // know we only have a single sampler. https://github.com/gfx-rs/wgpu/issues/8120
+                hlsl = hlsl
+                    .lines()
+                    .filter_map(|line| {
+                        if line.contains("SamplerHeap") || line.contains("SamplerIndexArray") {
+                            if line.contains("s_backdrop") {
+                                Some("SamplerState s_backdrop : register(s2);")
+                            } else {
+                                None
+                            }
+                        } else {
+                            Some(line)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+            }
+
             let id = CustomShaderId(self.custom.len() as u32);
             self.custom.push((
                 PipelineState::new_custom(
@@ -1654,8 +1752,8 @@ pub(crate) mod shader_resources {
                     ),
                     PCSTR::from_raw(
                         match target {
-                            ShaderTarget::Vertex => "vs_4_1\0",
-                            ShaderTarget::Fragment => "ps_4_1\0",
+                            ShaderTarget::Vertex => "vs_5_0\0",
+                            ShaderTarget::Fragment => "ps_5_0\0",
                         }
                         .as_ptr(),
                     ),
