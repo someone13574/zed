@@ -250,47 +250,50 @@ impl<T: ShaderUniform, const PASSES: usize> Element for ShaderElement<T, PASSES>
             hitbox.as_ref(),
             window,
             cx,
-            |_style, window, _cx| {
-                for pass_data in &self.data {
-                    match window.paint_shader(
-                        bounds,
-                        self.shader.main_body.clone(),
-                        self.shader.extra_items.clone(),
-                        self.shader.read_access,
-                        self.shader.read_margin,
-                        pass_data,
-                    ) {
-                        Ok(_) => {}
-                        Err((msg, first_err)) => {
-                            // Draw an error texture
-                            for x in 0..5 {
-                                for y in 0..5 {
-                                    window.paint_quad(fill(
-                                        Bounds {
-                                            origin: bounds.origin
-                                                + point(
-                                                    bounds.size.width / 5.0 * x,
-                                                    bounds.size.height / 5.0 * y,
-                                                ),
-                                            size: bounds.size / 5.0,
-                                        },
-                                        if (x + y) & 1 == 0 {
-                                            rgb(0xff00ff)
-                                        } else {
-                                            rgb(0x000000)
-                                        },
-                                    ));
-                                }
-                            }
+            |_style, window, _cx| match window.register_shader::<T>(
+                self.shader.main_body.clone(),
+                self.shader.extra_items.clone(),
+                self.shader.read_access,
+            ) {
+                Ok(shader_id) => {
+                    for pass_data in &self.data {
+                        window.paint_shader(
+                            shader_id,
+                            bounds,
+                            self.shader.read_access,
+                            self.shader.read_margin,
+                            pass_data,
+                        );
+                    }
+                }
+                Err((msg, first_err)) => {
+                    paint_error_texture(bounds, window);
 
-                            if first_err {
-                                eprintln!("Shader compile error: {msg}");
-                            }
-                        }
+                    if first_err {
+                        eprintln!("Shader compile error: {msg}");
                     }
                 }
             },
         );
+    }
+}
+
+fn paint_error_texture(bounds: Bounds<Pixels>, window: &mut Window) {
+    for x in 0..5 {
+        for y in 0..5 {
+            window.paint_quad(fill(
+                Bounds {
+                    origin: bounds.origin
+                        + point(bounds.size.width / 5.0 * x, bounds.size.height / 5.0 * y),
+                    size: bounds.size / 5.0,
+                },
+                if (x + y) & 1 == 0 {
+                    rgb(0xff00ff)
+                } else {
+                    rgb(0x000000)
+                },
+            ));
+        }
     }
 }
 

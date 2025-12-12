@@ -918,7 +918,8 @@ impl From<TileId> for etagere::AllocId {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct CustomShaderId(pub(crate) u32);
+/// An identifier for a custom shader which can be drawn using [Window::paint_shader]
+pub struct CustomShaderId(pub(crate) u32);
 
 pub(crate) struct PlatformInputHandler {
     cx: AsyncWindowContext,
