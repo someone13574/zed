@@ -3292,7 +3292,16 @@ impl Window {
         let read_bounds = if read_enabled {
             Some(
                 read_margin
-                    .map_or(self.bounds(), |margin| bounds.extend(margin))
+                    .map_or(
+                        Bounds {
+                            origin: Point {
+                                x: px(0.0),
+                                y: px(0.0),
+                            },
+                            size: self.viewport_size,
+                        },
+                        |margin| bounds.extend(margin),
+                    )
                     .scale(scale_factor)
                     .map_origin(|origin| origin.floor())
                     .map_size(|size| size.ceil()),
@@ -3300,6 +3309,7 @@ impl Window {
         } else {
             None
         };
+
         let bounds = bounds.scale(scale_factor);
         let content_mask = self.content_mask().scale(scale_factor);
         let shader_id = self.platform_window.register_shader(CustomShaderInfo {
