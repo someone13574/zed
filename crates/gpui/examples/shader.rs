@@ -3,8 +3,8 @@ use std::{f32::consts::PI, time::Duration};
 use gpui::{
     AbsoluteLength, Animation, AnimationExt, App, AppContext, Application, Bounds, Context,
     FragmentShader, IntoElement, Length, ParentElement, Radians, Render, RenderOnce, Rgba,
-    ShaderUniform, Styled, Window, WindowBounds, WindowOptions, div, px, radians, relative, rgb,
-    shader_element, shader_element_with_data, size,
+    ShaderReadAccess, ShaderUniform, Styled, Window, WindowBounds, WindowOptions, div, px, radians,
+    relative, rgb, shader_element, shader_element_with_data, size,
 };
 
 #[repr(C)]
@@ -268,7 +268,7 @@ impl RenderOnce for Blur {
             return result / sum;
         ",
         )
-        .read_under();
+        .read_access(Some(ShaderReadAccess::Under));
 
         assert!(self.radius <= 31);
 
