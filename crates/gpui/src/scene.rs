@@ -459,15 +459,23 @@ impl<'a> Iterator for BatchIterator<'a> {
                 let shaders_start = self.shaders_start;
                 let mut shaders_end = shaders_start + 1;
                 self.shaders_iter.next();
+
+                let mut write_bounds = self.shaders[shaders_start].base_data.bounds;
                 while self
                     .shaders_iter
                     .next_if(|shader| {
                         (shader.order, batch_kind) < max_order_and_kind
                             && shader.shader_id == shader_id
+                            && shader
+                                .read_bounds
+                                .is_none_or(|read| !read.intersects(&write_bounds))
                     })
                     .is_some()
                 {
                     shaders_end += 1;
+
+                    write_bounds =
+                        write_bounds.union(&self.shaders[shaders_end - 1].base_data.bounds);
                 }
                 self.shaders_start = shaders_end;
 
@@ -485,8 +493,8 @@ impl<'a> Iterator for BatchIterator<'a> {
                 Some(PrimitiveBatch::Shaders(
                     &self.shaders[shaders_start..shaders_end],
                     read_bounds.map(|bounds| Bounds {
-                        origin: bounds.origin.map(|p| p.0.abs() as u32),
-                        size: bounds.size.map(|s| s.0.ceil().abs() as u32),
+                        origin: bounds.origin.map(|p| p.0.max(0.0) as u32),
+                        size: bounds.size.map(|s| s.0.ceil().max(0.0) as u32),
                     }),
                 ))
             }
