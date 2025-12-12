@@ -190,7 +190,9 @@ pub(super) fn naga_validate_custom_shader(
         let binding = match global.name.as_ref().unwrap().as_str() {
             "globals" => 0,
             "b_instances" => 1,
-            _ => unreachable!(),
+            "t_backdrop" => 2,
+            "s_backdrop" => 2,
+            x => unreachable!("{x}"),
         };
 
         global.binding = Some(ResourceBinding {
