@@ -470,8 +470,24 @@ impl<'a> Iterator for BatchIterator<'a> {
                     shaders_end += 1;
                 }
                 self.shaders_start = shaders_end;
+
+                let read_bounds: Option<Bounds<ScaledPixels>> = self.shaders
+                    [shaders_start..shaders_end]
+                    .iter()
+                    .fold(None, |max_bounds, ShaderInstance { read_bounds, .. }| {
+                        max_bounds
+                            .zip(*read_bounds)
+                            .map(|(a, b)| a.union(&b))
+                            .or(max_bounds)
+                            .or(*read_bounds)
+                    });
+
                 Some(PrimitiveBatch::Shaders(
                     &self.shaders[shaders_start..shaders_end],
+                    read_bounds.map(|bounds| Bounds {
+                        origin: bounds.origin.map(|p| p.0.abs() as u32),
+                        size: bounds.size.map(|s| s.0.ceil().abs() as u32),
+                    }),
                 ))
             }
             PrimitiveKind::Surface => {
@@ -515,7 +531,7 @@ pub(crate) enum PrimitiveBatch<'a> {
         texture_id: AtlasTextureId,
         sprites: &'a [PolychromeSprite],
     },
-    Shaders(&'a [ShaderInstance]),
+    Shaders(&'a [ShaderInstance], Option<Bounds<u32>>),
     Surfaces(&'a [PaintSurface]),
 }
 

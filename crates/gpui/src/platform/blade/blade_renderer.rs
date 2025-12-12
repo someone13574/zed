@@ -933,22 +933,12 @@ impl BladeRenderer {
                     );
                     encoder.draw(0, 4, 0, sprites.len() as u32);
                 }
-                PrimitiveBatch::Shaders(instances) => {
+                PrimitiveBatch::Shaders(instances, read_bounds) => {
                     let (pipeline, instance_data_size, instance_data_align) = self
                         .pipelines
                         .custom
                         .get(instances[0].shader_id.0 as usize)
                         .expect("Shader not registered");
-                    let read_bounds: Option<Bounds<ScaledPixels>> = instances.iter().fold(
-                        None,
-                        |max_bounds, ShaderInstance { read_bounds, .. }| {
-                            max_bounds
-                                .zip(*read_bounds)
-                                .map(|(a, b)| a.union(&b))
-                                .or(max_bounds)
-                                .or(*read_bounds)
-                        },
-                    );
 
                     let backdrop = read_bounds.map(|_| {
                         if self.backdrop_texture.is_none() {
@@ -969,20 +959,13 @@ impl BladeRenderer {
                     });
 
                     if let Some(((backdrop, _), copy_bounds)) = backdrop.zip(read_bounds) {
-                        let origin = [
-                            (copy_bounds.origin.x.0.abs() as u32)
-                                .min(self.surface_config.size.width.saturating_sub(1)),
-                            (copy_bounds.origin.y.0.abs() as u32)
-                                .min(self.surface_config.size.height.saturating_sub(1)),
-                            0,
-                        ];
-
-                        let bottom_right = [
-                            (copy_bounds.bottom_right().x.0.abs() as u32)
-                                .min(self.surface_config.size.width),
-                            (copy_bounds.bottom_right().y.0.abs() as u32)
-                                .min(self.surface_config.size.height),
-                        ];
+                        let bounds = copy_bounds.intersect(&Bounds {
+                            origin: Point::default(),
+                            size: Size {
+                                width: self.surface_config.size.width,
+                                height: self.surface_config.size.height,
+                            },
+                        });
 
                         drop(pass);
                         self.command_encoder
@@ -992,17 +975,17 @@ impl BladeRenderer {
                                     texture: frame.texture(),
                                     mip_level: 0,
                                     array_layer: 0,
-                                    origin,
+                                    origin: [bounds.origin.x, bounds.origin.y, 0],
                                 },
                                 TexturePiece {
                                     texture: backdrop,
                                     mip_level: 0,
                                     array_layer: 0,
-                                    origin,
+                                    origin: [bounds.origin.x, bounds.origin.y, 0],
                                 },
                                 gpu::Extent {
-                                    width: bottom_right[0].saturating_sub(origin[0]),
-                                    height: bottom_right[1].saturating_sub(origin[1]),
+                                    width: bounds.size.width,
+                                    height: bounds.size.height,
                                     depth: self.surface_config.size.depth,
                                 },
                             );
