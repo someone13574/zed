@@ -3271,10 +3271,11 @@ impl Window {
     /// Paint a custom shader
     ///
     /// This method should only be called as a part of the paint phase of element drawing.
-    pub fn paint_shader(
+    pub fn paint_shader<T: bytemuck::Pod>(
         &mut self,
         bounds: Bounds<Pixels>,
         shader: &CustomShader,
+        user_data: T,
     ) -> Result<(), &'static str> {
         self.invalidator.debug_assert_paint();
 
@@ -3283,13 +3284,14 @@ impl Window {
         let content_mask = self.content_mask().scale(scale_factor);
         let shader_id = self.platform_window.register_shader(shader)?;
 
-        self.next_frame.scene.insert_primitive(PaintShader {
+        self.next_frame.scene.insert_primitive(ShaderPrimitive {
             order: 0,
             shader_id,
             bounds: bounds
                 .map_origin(|origin| origin.floor())
                 .map_size(|size| size.ceil()),
             content_mask,
+            user_data: bytemuck::bytes_of(&user_data).to_vec(),
         });
         Ok(())
     }
