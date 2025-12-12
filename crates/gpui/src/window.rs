@@ -3297,15 +3297,16 @@ impl Window {
             std::slice::from_raw_parts((user_data as *const T) as *const u8, size_of::<T>())
         };
 
-        self.next_frame.scene.insert_primitive(ShaderPrimitive {
+        self.next_frame.scene.insert_primitive(ShaderInstance {
             order: 0,
             shader_id,
-            bounds: bounds
-                .map_origin(|origin| origin.floor())
-                .map_size(|size| size.ceil()),
-            content_mask,
-            user_data: user_data_bytes.to_vec(),
-            user_data_align: T::ALIGN,
+            base_data: ShaderInstanceBase {
+                bounds: bounds
+                    .map_origin(|origin| origin.floor())
+                    .map_size(|size| size.ceil()),
+                content_mask,
+            },
+            data: SmallVec::from_slice(user_data_bytes),
         });
         Ok(())
     }
