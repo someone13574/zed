@@ -461,6 +461,7 @@ impl<'a> Iterator for BatchIterator<'a> {
                 self.shaders_iter.next();
 
                 let mut write_bounds = self.shaders[shaders_start].base_data.bounds;
+                let mut read_bounds = self.shaders[shaders_start].read_bounds;
                 while self
                     .shaders_iter
                     .next_if(|shader| {
@@ -474,27 +475,23 @@ impl<'a> Iterator for BatchIterator<'a> {
                 {
                     shaders_end += 1;
 
-                    write_bounds =
-                        write_bounds.union(&self.shaders[shaders_end - 1].base_data.bounds);
+                    let shader = &self.shaders[shaders_end - 1];
+                    write_bounds = write_bounds.union(&shader.base_data.bounds);
+                    read_bounds = read_bounds
+                        .zip(shader.read_bounds)
+                        .map(|(a, b)| a.union(&b))
+                        .or(read_bounds)
+                        .or(shader.read_bounds);
                 }
                 self.shaders_start = shaders_end;
 
-                let read_bounds: Option<Bounds<ScaledPixels>> = self.shaders
-                    [shaders_start..shaders_end]
-                    .iter()
-                    .fold(None, |max_bounds, ShaderPrimitive { read_bounds, .. }| {
-                        max_bounds
-                            .zip(*read_bounds)
-                            .map(|(a, b)| a.union(&b))
-                            .or(max_bounds)
-                            .or(*read_bounds)
-                    });
-
                 Some(PrimitiveBatch::Shaders(
                     &self.shaders[shaders_start..shaders_end],
-                    read_bounds.map(|bounds| Bounds {
-                        origin: bounds.origin.map(|p| p.0.max(0.0) as u32),
-                        size: bounds.size.map(|s| s.0.ceil().max(0.0) as u32),
+                    read_bounds.map(|bounds| {
+                        Bounds::from_corners(
+                            bounds.origin.map(|p| p.0.max(0.0) as u32),
+                            bounds.bottom_right().map(|p| p.0.ceil().max(0.0) as u32),
+                        )
                     }),
                 ))
             }
