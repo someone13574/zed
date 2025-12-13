@@ -9,7 +9,7 @@ use gpui::{
 
 #[repr(C)]
 #[derive(ShaderUniform, Clone, Copy)]
-pub struct WarpShaderInstance {
+pub struct WarpShaderData {
     pub color_a: [f32; 4],
     pub color_b: [f32; 4],
     pub time: f32,
@@ -75,12 +75,12 @@ impl Render for ShaderExample {
                 this.child(
                     shader_element_with_data(
                         warping_shader.clone(),
-                        [WarpShaderInstance {
+                        WarpShaderData {
                             color_a: [0.0, 0.5, 1.0, 1.0],
                             color_b: [1.0, 0.0, 0.0, 1.0],
                             time: (2.0 * PI * t).sin() * 0.25 + 4.0,
                             hurst: 0.95,
-                        }],
+                        },
                     )
                     .size_full()
                     .absolute(),
@@ -212,13 +212,13 @@ impl RenderOnce for Star {
                 return length(p - v3 * clamp(dot(p, v3), 0.0, k1z * r)) * sign(p.y * v3.x - p.x * v3.y);
             }
         "),
-        [StarInstanceData {
+        StarInstanceData {
             bg: [self.bg.r, self.bg.g, self.bg.b, self.bg.a],
             border_color: [self.border_color.r, self.border_color.g, self.border_color.b, self.border_color.a],
             border: self.border.to_pixels(window.rem_size()).into(),
             sine: self.rotation.0.sin(),
             cosine: self.rotation.0.cos(),
-        }]).size(self.size)
+        }).size(self.size)
     }
 }
 
@@ -285,7 +285,6 @@ impl RenderOnce for Blur {
             sum += weight;
         }
 
-        // normalize
         if sum != 0.0 {
             for idx in 0..samples {
                 weights[idx] /= sum;
@@ -299,21 +298,22 @@ impl RenderOnce for Blur {
             .items_center()
             .child(
                 shader_element_with_data(
+                    blur_shader.clone(),
+                    BlurData {
+                        direction: [0.0, 1.0],
+                        offsets: F32Array(offsets),
+                        weights: F32Array(weights),
+                        samples: samples as u32,
+                    },
+                )
+                .chain_with_data(
                     blur_shader,
-                    [
-                        BlurData {
-                            direction: [0.0, 1.0],
-                            offsets: F32Array(offsets),
-                            weights: F32Array(weights),
-                            samples: samples as u32,
-                        },
-                        BlurData {
-                            direction: [1.0, 0.0],
-                            offsets: F32Array(offsets),
-                            weights: F32Array(weights),
-                            samples: samples as u32,
-                        },
-                    ],
+                    BlurData {
+                        direction: [1.0, 0.0],
+                        offsets: F32Array(offsets),
+                        weights: F32Array(weights),
+                        samples: samples as u32,
+                    },
                 )
                 .size_64(),
             )

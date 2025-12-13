@@ -99,7 +99,7 @@ struct DirectXRenderPipelines {
     mono_sprites: PipelineState<MonochromeSprite>,
     poly_sprites: PipelineState<PolychromeSprite>,
 
-    custom: Vec<(PipelineState<ShaderInstance>, usize, usize)>,
+    custom: Vec<(PipelineState<ShaderPrimitive>, usize, usize)>,
     custom_ids: HashMap<CustomShaderInfo, Result<CustomShaderId, String>>,
 }
 
@@ -655,7 +655,7 @@ impl DirectXRenderer {
 
     fn draw_custom_shaders(
         &mut self,
-        shaders: &[ShaderInstance],
+        shaders: &[ShaderPrimitive],
         read_bounds: Option<Bounds<u32>>,
         shader_data: &[u8],
     ) -> Result<()> {
@@ -672,7 +672,7 @@ impl DirectXRenderer {
             .unwrap();
 
         let (_, instance_size) =
-            ShaderInstance::size_info(*instance_data_size, *instance_data_align);
+            ShaderPrimitive::size_info(*instance_data_size, *instance_data_align);
 
         if pipeline.buffer_size < shaders.len() {
             let new_buffer_size = shaders.len().next_power_of_two();
@@ -701,7 +701,7 @@ impl DirectXRenderer {
                     Some(&mut dst),
                 )
                 .unwrap();
-            ShaderInstance::pack_instances(
+            ShaderPrimitive::pack_instances(
                 dst.pData as _,
                 shaders,
                 shader_data,

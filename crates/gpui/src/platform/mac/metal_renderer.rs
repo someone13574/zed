@@ -2,7 +2,7 @@ use super::metal_atlas::MetalAtlas;
 use crate::{
     AtlasTextureId, Background, Bounds, ContentMask, CustomShaderId, DevicePixels,
     MonochromeSprite, PaintSurface, Path, Point, PolychromeSprite, PrimitiveBatch, Quad,
-    ScaledPixels, Scene, ShaderInstance, Shadow, Size, Surface, Underline,
+    ScaledPixels, Scene, ShaderPrimitive, Shadow, Size, Surface, Underline,
     platform::shader::{CustomShaderGlobalParams, naga_validate_custom_shader},
     point,
     shader::CustomShaderInfo,
@@ -1226,7 +1226,7 @@ impl MetalRenderer {
 
     fn draw_custom_shaders(
         &mut self,
-        instances: &[ShaderInstance],
+        instances: &[ShaderPrimitive],
         shader_data: &[u8],
         read_backdrop: bool,
         instance_buffer: &mut InstanceBuffer,
@@ -1283,7 +1283,7 @@ impl MetalRenderer {
         );
 
         let (_, instance_size) =
-            ShaderInstance::size_info(*instance_data_size, *instance_data_align);
+            ShaderPrimitive::size_info(*instance_data_size, *instance_data_align);
         let buffer_contents =
             unsafe { (instance_buffer.metal_buffer.contents() as *mut u8).add(*instance_offset) };
         let next_offset = *instance_offset + instance_size * instances.len();
@@ -1292,7 +1292,7 @@ impl MetalRenderer {
         }
 
         unsafe {
-            ShaderInstance::pack_instances(
+            ShaderPrimitive::pack_instances(
                 buffer_contents,
                 instances,
                 shader_data,
