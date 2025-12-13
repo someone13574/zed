@@ -13,8 +13,8 @@ use crate::{
     PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow, Point, PolychromeSprite,
     Priority, PromptButton, PromptLevel, Quad, Render, RenderGlyphParams, RenderImage,
     RenderImageParams, RenderSvgParams, Replay, ResizeEdge, SMOOTH_SVG_SCALE_FACTOR,
-    SUBPIXEL_VARIANTS_X, SUBPIXEL_VARIANTS_Y, ScaledPixels, Scene, ShaderInstance,
-    ShaderInstanceBase, ShaderUniform, Shadow, SharedString, Size, StrikethroughStyle, Style,
+    SUBPIXEL_VARIANTS_X, SUBPIXEL_VARIANTS_Y, ScaledPixels, Scene, ShaderPrimitive,
+    ShaderPrimitiveHeader, ShaderUniform, Shadow, SharedString, Size, StrikethroughStyle, Style,
     SubscriberSet, Subscription, SystemWindowTab, SystemWindowTabController, TabStopMap,
     TaffyLayoutEngine, Task, TextStyle, TextStyleRefinement, TransformationMatrix, Underline,
     UnderlineStyle, WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowControls,
@@ -3298,11 +3298,11 @@ impl Window {
         };
 
         let data_range = self.next_frame.scene.push_shader_data(instance_data);
-        self.next_frame.scene.insert_primitive(ShaderInstance {
+        self.next_frame.scene.insert_primitive(ShaderPrimitive {
             order: 0,
             shader_id,
             read_bounds,
-            base_data: ShaderInstanceBase {
+            base_data: ShaderPrimitiveHeader {
                 bounds: bounds
                     .map_origin(|origin| origin.floor())
                     .map_size(|size| size.ceil()),

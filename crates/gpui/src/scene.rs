@@ -31,7 +31,7 @@ pub(crate) struct Scene {
     pub(crate) underlines: Vec<Underline>,
     pub(crate) monochrome_sprites: Vec<MonochromeSprite>,
     pub(crate) polychrome_sprites: Vec<PolychromeSprite>,
-    pub(crate) shaders: Vec<ShaderInstance>,
+    pub(crate) shaders: Vec<ShaderPrimitive>,
     pub(crate) shader_data: Vec<u8>,
     pub(crate) surfaces: Vec<PaintSurface>,
 }
@@ -243,7 +243,7 @@ pub(crate) enum Primitive {
     Underline(Underline),
     MonochromeSprite(MonochromeSprite),
     PolychromeSprite(PolychromeSprite),
-    Shader(ShaderInstance),
+    Shader(ShaderPrimitive),
     Surface(PaintSurface),
 }
 
@@ -301,9 +301,9 @@ struct BatchIterator<'a> {
     polychrome_sprites: &'a [PolychromeSprite],
     polychrome_sprites_start: usize,
     polychrome_sprites_iter: Peekable<slice::Iter<'a, PolychromeSprite>>,
-    shaders: &'a [ShaderInstance],
+    shaders: &'a [ShaderPrimitive],
     shaders_start: usize,
-    shaders_iter: Peekable<slice::Iter<'a, ShaderInstance>>,
+    shaders_iter: Peekable<slice::Iter<'a, ShaderPrimitive>>,
     surfaces: &'a [PaintSurface],
     surfaces_start: usize,
     surfaces_iter: Peekable<slice::Iter<'a, PaintSurface>>,
@@ -482,7 +482,7 @@ impl<'a> Iterator for BatchIterator<'a> {
                 let read_bounds: Option<Bounds<ScaledPixels>> = self.shaders
                     [shaders_start..shaders_end]
                     .iter()
-                    .fold(None, |max_bounds, ShaderInstance { read_bounds, .. }| {
+                    .fold(None, |max_bounds, ShaderPrimitive { read_bounds, .. }| {
                         max_bounds
                             .zip(*read_bounds)
                             .map(|(a, b)| a.union(&b))
@@ -539,7 +539,7 @@ pub(crate) enum PrimitiveBatch<'a> {
         texture_id: AtlasTextureId,
         sprites: &'a [PolychromeSprite],
     },
-    Shaders(&'a [ShaderInstance], Option<Bounds<u32>>),
+    Shaders(&'a [ShaderPrimitive], Option<Bounds<u32>>),
     Surfaces(&'a [PaintSurface]),
 }
 
@@ -750,7 +750,7 @@ impl From<PolychromeSprite> for Primitive {
 
 #[derive(Clone, Debug)]
 #[repr(C)]
-pub(crate) struct ShaderInstanceBase {
+pub(crate) struct ShaderPrimitiveHeader {
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
     pub opacity: f32,
@@ -758,26 +758,26 @@ pub(crate) struct ShaderInstanceBase {
 }
 
 #[allow(unused)]
-impl ShaderInstanceBase {
+impl ShaderPrimitiveHeader {
     pub const ALIGN: usize = 8; // largest alignment used is a vec2
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ShaderInstance {
+pub(crate) struct ShaderPrimitive {
     pub order: DrawOrder,
     pub shader_id: CustomShaderId,
     pub read_bounds: Option<Bounds<ScaledPixels>>,
-    pub base_data: ShaderInstanceBase,
+    pub base_data: ShaderPrimitiveHeader,
     pub data_range: Range<usize>,
 }
 
 #[allow(unused)]
-impl ShaderInstance {
+impl ShaderPrimitive {
     /// Returns the data offset and instance size for a given instance data size and align
     pub fn size_info(instance_data_size: usize, instance_data_align: usize) -> (usize, usize) {
-        let instance_align = ShaderInstanceBase::ALIGN.max(instance_data_align);
+        let instance_align = ShaderPrimitiveHeader::ALIGN.max(instance_data_align);
         let instance_data_offset =
-            size_of::<ShaderInstanceBase>().next_multiple_of(instance_data_align);
+            size_of::<ShaderPrimitiveHeader>().next_multiple_of(instance_data_align);
         let instance_size =
             (instance_data_offset + instance_data_size).next_multiple_of(instance_align);
 
@@ -802,8 +802,8 @@ impl ShaderInstance {
                 let offset = idx * instance_size;
                 let dst = buffer.add(offset);
 
-                let src = (&instance.base_data as *const ShaderInstanceBase) as *const u8;
-                std::ptr::copy_nonoverlapping(src, dst, size_of::<ShaderInstanceBase>());
+                let src = (&instance.base_data as *const ShaderPrimitiveHeader) as *const u8;
+                std::ptr::copy_nonoverlapping(src, dst, size_of::<ShaderPrimitiveHeader>());
 
                 if data_size > 0 {
                     debug_assert_eq!(data_size, instance.data_range.len());
@@ -817,8 +817,8 @@ impl ShaderInstance {
     }
 }
 
-impl From<ShaderInstance> for Primitive {
-    fn from(value: ShaderInstance) -> Self {
+impl From<ShaderPrimitive> for Primitive {
+    fn from(value: ShaderPrimitive) -> Self {
         Primitive::Shader(value)
     }
 }

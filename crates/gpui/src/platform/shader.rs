@@ -145,7 +145,7 @@ impl Display for CustomShaderInfo {
 
 #[cfg(not(any(target_os = "linux", all(target_os = "macos", feature = "macos-blade"))))]
 use {
-    crate::ShaderInstance,
+    crate::ShaderPrimitive,
     naga::{
         Module, ResourceBinding, Type, TypeInner,
         front::wgsl,
@@ -247,7 +247,7 @@ pub(super) fn naga_validate_custom_shader(
         )?;
     }
 
-    let (_, instance_size) = ShaderInstance::size_info(data_size, data_align);
+    let (_, instance_size) = ShaderPrimitive::size_info(data_size, data_align);
     check_struct_size(&module, "Instance", instance_size)?;
     check_struct_size(
         &module,

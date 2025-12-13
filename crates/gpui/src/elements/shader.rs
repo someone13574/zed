@@ -57,9 +57,9 @@ impl<T: ShaderUniform> FragmentShader<T> {
     ///
     /// Additionally, any functions or types defined using [FragmentShader::with_item]
     /// will be accessible within the main body.
-    pub fn new(main_body: &'static str) -> Self {
+    pub fn new<S: Into<SharedString>>(main_body: S) -> Self {
         Self {
-            main_body: SharedString::new_static(main_body),
+            main_body: main_body.into(),
             extra_items: SmallVec::new(),
             read_access: None,
             _marker: PhantomData,
@@ -67,8 +67,8 @@ impl<T: ShaderUniform> FragmentShader<T> {
     }
 
     /// Adds a helper function or type to the shader code.
-    pub fn with_item(mut self, item: &'static str) -> Self {
-        self.extra_items.push(SharedString::new_static(item));
+    pub fn with_item<S: Into<SharedString>>(mut self, item: S) -> Self {
+        self.extra_items.push(item.into());
         self
     }
 
@@ -79,15 +79,89 @@ impl<T: ShaderUniform> FragmentShader<T> {
     }
 }
 
+trait ShaderPass {
+    fn paint(&self, window: &mut Window, bounds: Bounds<Pixels>);
+}
+
+#[doc(hidden)]
+pub struct ShaderInstance<T: ShaderUniform> {
+    shader: FragmentShader<T>,
+    data: T,
+}
+
+impl<T: ShaderUniform> ShaderPass for ShaderInstance<T> {
+    fn paint(&self, window: &mut Window, bounds: Bounds<Pixels>) {
+        match window.register_shader::<T>(
+            self.shader.main_body.clone(),
+            self.shader.extra_items.clone(),
+            self.shader.read_access.is_some(),
+        ) {
+            Ok(shader_id) => {
+                let read_bounds = match self.shader.read_access {
+                    Some(ShaderReadAccess::Under) => Some(bounds),
+                    Some(ShaderReadAccess::Around(edges)) => Some(bounds.extend(edges)),
+                    Some(ShaderReadAccess::Window) => Some(Bounds {
+                        origin: Point::default(),
+                        size: window.viewport_size,
+                    }),
+                    None => None,
+                };
+
+                window.paint_shader(shader_id, bounds, read_bounds, &self.data);
+            }
+            Err((msg, first_err)) => {
+                paint_error_texture(bounds, window);
+
+                if first_err {
+                    eprintln!("Shader compile error: {msg}");
+                }
+            }
+        }
+    }
+}
+
+#[doc(hidden)]
+pub struct ChainedShaderInstance<T: ShaderUniform, P> {
+    this: ShaderInstance<T>,
+    prev: P,
+}
+
+impl<T: ShaderUniform, P: ShaderPass> ShaderPass for ChainedShaderInstance<T, P> {
+    fn paint(&self, window: &mut Window, bounds: Bounds<Pixels>) {
+        self.prev.paint(window, bounds);
+        self.this.paint(window, bounds);
+    }
+}
+
 /// An element which can render an instance of a fragment shader.
 /// Use [shader_element] or [shader_element_with_data] to construct.
-pub struct ShaderElement<T: ShaderUniform, const PASSES: usize> {
-    shader: FragmentShader<T>,
-    data: [T; PASSES],
+pub struct ShaderElement<P> {
+    pass: P,
     interactivity: Interactivity,
 }
 
-impl<T: ShaderUniform, const PASSES: usize> ShaderElement<T, PASSES> {
+impl<P> ShaderElement<P> {
+    /// Runs another shader after this one using the same bounds. To pass data
+    /// to this shader, use [ShaderElement::chain_with_data] instead.
+    pub fn chain(self, shader: FragmentShader<()>) -> ShaderElement<ChainedShaderInstance<(), P>> {
+        self.chain_with_data(shader, ())
+    }
+
+    /// Runs another shader after this one using the same bounds.
+    pub fn chain_with_data<T: ShaderUniform>(
+        self,
+        shader: FragmentShader<T>,
+        data: T,
+    ) -> ShaderElement<ChainedShaderInstance<T, P>> {
+        ShaderElement {
+            pass: ChainedShaderInstance {
+                this: ShaderInstance { shader, data },
+                prev: self.pass,
+            },
+            interactivity: self.interactivity,
+        }
+    }
+
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.interactivity.base_style
     }
@@ -113,7 +187,7 @@ impl<T: ShaderUniform, const PASSES: usize> ShaderElement<T, PASSES> {
     });
 }
 
-impl<T: ShaderUniform, const PASSES: usize> InteractiveElement for ShaderElement<T, PASSES> {
+impl<P: ShaderPass> InteractiveElement for ShaderElement<P> {
     fn interactivity(&mut self) -> &mut Interactivity {
         &mut self.interactivity
     }
@@ -121,10 +195,9 @@ impl<T: ShaderUniform, const PASSES: usize> InteractiveElement for ShaderElement
 
 /// Constructs a [ShaderElement] which renders a shader which *doesn't* take
 /// instance data. If you need to pass data to your shader, use [shader_element_with_data].
-pub fn shader_element(shader: FragmentShader<()>) -> ShaderElement<(), 1> {
+pub fn shader_element(shader: FragmentShader<()>) -> ShaderElement<ShaderInstance<()>> {
     ShaderElement {
-        shader,
-        data: [()],
+        pass: ShaderInstance { shader, data: () },
         interactivity: Interactivity::new(),
     }
 }
@@ -133,18 +206,17 @@ pub fn shader_element(shader: FragmentShader<()>) -> ShaderElement<(), 1> {
 /// within the shader's main body. If the data array contains multiple instances,
 /// then the shader will be run once for each element in that array, using the
 /// same bounds.
-pub fn shader_element_with_data<T: ShaderUniform, const PASSES: usize>(
+pub fn shader_element_with_data<T: ShaderUniform>(
     shader: FragmentShader<T>,
-    data: [T; PASSES],
-) -> ShaderElement<T, PASSES> {
+    data: T,
+) -> ShaderElement<ShaderInstance<T>> {
     ShaderElement {
-        shader,
-        data,
+        pass: ShaderInstance { shader, data },
         interactivity: Interactivity::new(),
     }
 }
 
-impl<T: ShaderUniform, const PASSES: usize> IntoElement for ShaderElement<T, PASSES> {
+impl<P: ShaderPass + 'static> IntoElement for ShaderElement<P> {
     type Element = Self;
 
     fn into_element(self) -> Self::Element {
@@ -152,7 +224,7 @@ impl<T: ShaderUniform, const PASSES: usize> IntoElement for ShaderElement<T, PAS
     }
 }
 
-impl<T: ShaderUniform, const PASSES: usize> Element for ShaderElement<T, PASSES> {
+impl<P: ShaderPass + 'static> Element for ShaderElement<P> {
     type RequestLayoutState = ();
     type PrepaintState = Option<Hitbox>;
 
@@ -218,33 +290,8 @@ impl<T: ShaderUniform, const PASSES: usize> Element for ShaderElement<T, PASSES>
             hitbox.as_ref(),
             window,
             cx,
-            |_style, window, _cx| match window.register_shader::<T>(
-                self.shader.main_body.clone(),
-                self.shader.extra_items.clone(),
-                self.shader.read_access.is_some(),
-            ) {
-                Ok(shader_id) => {
-                    let read_bounds = match self.shader.read_access {
-                        Some(ShaderReadAccess::Under) => Some(bounds),
-                        Some(ShaderReadAccess::Around(edges)) => Some(bounds.extend(edges)),
-                        Some(ShaderReadAccess::Window) => Some(Bounds {
-                            origin: Point::default(),
-                            size: window.viewport_size,
-                        }),
-                        None => None,
-                    };
-
-                    for pass_data in &self.data {
-                        window.paint_shader(shader_id, bounds, read_bounds, pass_data);
-                    }
-                }
-                Err((msg, first_err)) => {
-                    paint_error_texture(bounds, window);
-
-                    if first_err {
-                        eprintln!("Shader compile error: {msg}");
-                    }
-                }
+            |_style, window, _cx| {
+                self.pass.paint(window, bounds);
             },
         );
     }

@@ -6,7 +6,7 @@ use crate::platform::shader::CustomShaderGlobalParams;
 use crate::shader::CustomShaderInfo;
 use crate::{
     Background, Bounds, CustomShaderId, DevicePixels, GpuSpecs, MonochromeSprite, Path, Point,
-    PolychromeSprite, PrimitiveBatch, Quad, ScaledPixels, Scene, ShaderInstance, Shadow, Size,
+    PolychromeSprite, PrimitiveBatch, Quad, ScaledPixels, Scene, ShaderPrimitive, Shadow, Size,
     Underline, get_gamma_correction_ratios,
 };
 use blade_graphics::{self as gpu, ShaderData, TexturePiece};
@@ -357,7 +357,7 @@ impl BladePipelines {
             );
         }
 
-        let (_, instance_size) = ShaderInstance::size_info(info.data_size, info.data_align);
+        let (_, instance_size) = ShaderPrimitive::size_info(info.data_size, info.data_align);
         assert_eq!(shader.get_struct_size("Instance") as usize, instance_size);
 
         let blend_mode = match surface_info.alpha {
@@ -1003,12 +1003,12 @@ impl BladeRenderer {
                     }
 
                     let (_, instance_size) =
-                        ShaderInstance::size_info(*instance_data_size, *instance_data_align);
+                        ShaderPrimitive::size_info(*instance_data_size, *instance_data_align);
                     let instance_buf = self
                         .instance_belt
                         .alloc((instance_size * instances.len()) as u64, &self.gpu);
                     unsafe {
-                        ShaderInstance::pack_instances(
+                        ShaderPrimitive::pack_instances(
                             instance_buf.data(),
                             instances,
                             &scene.shader_data,
