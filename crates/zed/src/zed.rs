@@ -4746,6 +4746,7 @@ mod tests {
                 "go_to_line",
                 "icon_theme_selector",
                 "input",
+                "inline_assistant",
                 "journal",
                 "keymap_editor",
                 "keystroke_input",
