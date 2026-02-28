@@ -19,14 +19,12 @@ path = "tests/integration/main.rs"
 
 [dependencies]
 anyhow.workspace = true
-async-tar.workspace = true
 async-trait.workspace = true
+async-channel.workspace = true
 collections.workspace = true
 futures.workspace = true
-git.workspace = true
 gpui.workspace = true
 ignore.workspace = true
-libc.workspace = true
 log.workspace = true
 parking_lot.workspace = true
 paths.workspace = true
@@ -34,11 +32,17 @@ rope.workspace = true
 proto.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-smol.workspace = true
 tempfile.workspace = true
 text.workspace = true
 time.workspace = true
 util.workspace = true
+
+git.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+async-tar.workspace = true
+libc.workspace = true
+smol.workspace = true
 is_executable = "1.0.5"
 notify = "8.2.0"
 
@@ -59,3 +63,4 @@ git = { workspace = true, features = ["test-support"] }
 
 [features]
 test-support = ["gpui/test-support", "git/test-support"]
+wasm = []

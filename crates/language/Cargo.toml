@@ -55,7 +55,6 @@ serde_json.workspace = true
 settings.workspace = true
 shellexpand.workspace = true
 smallvec.workspace = true
-smol.workspace = true
 streaming-iterator.workspace = true
 strsim.workspace = true
 sum_tree.workspace = true
@@ -67,13 +66,20 @@ tree-sitter-md = { workspace = true, optional = true }
 tree-sitter-python = { workspace = true, optional = true }
 tree-sitter-rust = { workspace = true, optional = true }
 tree-sitter-typescript = { workspace = true, optional = true }
-tree-sitter.workspace = true
 unicase = "2.6"
 util.workspace = true
 watch.workspace = true
+web-time.workspace = true
 zlog.workspace = true
 ztracing.workspace = true
 diffy = "0.4.2"
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+smol.workspace = true
+tree-sitter = { workspace = true, features = ["wasm"] }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+tree-sitter.workspace = true
 
 [dev-dependencies]
 collections = { workspace = true, features = ["test-support"] }

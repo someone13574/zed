@@ -53,6 +53,7 @@ pub(crate) struct WebWindowInner {
     pub(crate) pressed_button: Cell<Option<MouseButton>>,
     pub(crate) last_physical_size: Cell<(u32, u32)>,
     pub(crate) notify_scale: Cell<bool>,
+    pending_physical_size: Cell<Option<(u32, u32)>>,
     mql_handle: RefCell<Option<MqlHandle>>,
 }
 
@@ -113,11 +114,29 @@ impl WebWindow {
         body.append_child(&canvas)
             .map_err(|e| anyhow::anyhow!("Failed to append canvas to body: {e:?}"))?;
 
-        canvas.focus().ok();
+        // Defer focus to avoid re-entering the App borrow. When `canvas.focus()` is
+        // called synchronously inside `App::open_window` (which holds a mutable borrow
+        // of the App state), the browser fires a `blur` event on the previously-focused
+        // element synchronously, which tries to update App state and causes a
+        // "RefCell already borrowed" error. Deferring via setTimeout(0) lets
+        // `open_window` return before the focus event fires.
+        {
+            let canvas = canvas.clone();
+            let closure = Closure::once(move || {
+                canvas.focus().ok();
+            });
+            browser_window
+                .set_timeout_with_callback_and_timeout_and_arguments_0(
+                    closure.as_ref().unchecked_ref(),
+                    0,
+                )
+                .ok();
+            closure.forget();
+        }
 
         let device_size = Size {
-            width: DevicePixels(0),
-            height: DevicePixels(0),
+            width: DevicePixels(1),
+            height: DevicePixels(1),
         };
 
         let renderer_config = WgpuSurfaceConfig {
@@ -163,6 +182,7 @@ impl WebWindow {
             last_physical_size: Cell::new((0, 0)),
             notify_scale: Cell::new(false),
             mql_handle: RefCell::new(None),
+            pending_physical_size: Cell::new(None),
         });
 
         let raf_closure = inner.create_raf_closure();
@@ -252,8 +272,10 @@ impl WebWindow {
             let clamped_width = physical_width.min(max_texture_dimension);
             let clamped_height = physical_height.min(max_texture_dimension);
 
-            inner.canvas.set_width(clamped_width);
-            inner.canvas.set_height(clamped_height);
+            inner
+                .pending_physical_size
+                .set(Some((clamped_width, clamped_height)));
+            log::warn!("Requesting resize to {clamped_width}x{clamped_height}");
 
             {
                 let mut s = inner.state.borrow_mut();
@@ -262,10 +284,6 @@ impl WebWindow {
                     height: px(logical_height),
                 };
                 s.scale_factor = dpr_f32;
-                s.renderer.update_drawable_size(Size {
-                    width: DevicePixels(clamped_width as i32),
-                    height: DevicePixels(clamped_height as i32),
-                });
             }
 
             let new_size = Size {
@@ -637,6 +655,24 @@ impl PlatformWindow for WebWindow {
     }
 
     fn draw(&self, scene: &Scene) {
+        // Apply pending canvas+surface resize at the start of the frame
+        if let Some((w, h)) = self.inner.pending_physical_size.take() {
+            log::warn!("Applying resize to {w}x{h}");
+
+            // Avoid redundant buffer replacement
+            if self.inner.canvas.width() != w || self.inner.canvas.height() != h {
+                self.inner.canvas.set_width(w);
+                self.inner.canvas.set_height(h);
+            }
+
+            let mut state = self.inner.state.borrow_mut();
+            state.renderer.update_drawable_size(Size {
+                width: DevicePixels(w as i32),
+                height: DevicePixels(h as i32),
+            });
+            drop(state);
+        }
+
         let mut state = self.inner.state.borrow_mut();
         if state.bounds.size.width <= Pixels::ZERO || state.bounds.size.height <= Pixels::ZERO {
             return;

@@ -2,15 +2,21 @@ use std::ffi::OsStr;
 #[cfg(not(target_os = "macos"))]
 use std::path::Path;
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", not(target_family = "wasm")))]
 mod darwin;
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", not(target_family = "wasm")))]
 pub use darwin::{Child, Command, Stdio};
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", not(target_family = "wasm")))]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000_u32;
 
+#[cfg(not(target_os = "macos"))]
+pub fn new_command(program: impl AsRef<OsStr>) -> Command {
+    Command::new(program)
+}
+
+#[cfg(all(target_os = "macos", not(target_family = "wasm")))]
 pub fn new_command(program: impl AsRef<OsStr>) -> Command {
     Command::new(program)
 }
@@ -24,7 +30,12 @@ pub fn new_std_command(program: impl AsRef<OsStr>) -> std::process::Command {
     command
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), not(target_family = "wasm")))]
+pub fn new_std_command(program: impl AsRef<OsStr>) -> std::process::Command {
+    std::process::Command::new(program)
+}
+
+#[cfg(target_family = "wasm")]
 pub fn new_std_command(program: impl AsRef<OsStr>) -> std::process::Command {
     std::process::Command::new(program)
 }

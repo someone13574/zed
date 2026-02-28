@@ -2,11 +2,11 @@ use std::path::Path;
 
 use anyhow::{Context as _, Result};
 use async_zip::base::read;
-#[cfg(not(windows))]
+#[cfg(unix)]
 use futures::AsyncSeek;
 use futures::{AsyncRead, io::BufReader};
 
-#[cfg(any(unix, windows))]
+#[cfg(any(unix, windows, target_family = "wasm"))]
 fn archive_path_is_normal(filename: &str) -> bool {
     Path::new(filename).components().all(|c| {
         matches!(
@@ -16,7 +16,7 @@ fn archive_path_is_normal(filename: &str) -> bool {
     })
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_family = "wasm"))]
 pub async fn extract_zip<R: AsyncRead + Unpin>(destination: &Path, reader: R) -> Result<()> {
     let mut reader = read::stream::ZipFileReader::new(BufReader::new(reader));
 

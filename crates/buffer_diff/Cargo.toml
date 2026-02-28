@@ -17,7 +17,6 @@ test-support = ["settings"]
 [dependencies]
 clock.workspace = true
 futures.workspace = true
-git2.workspace = true
 gpui.workspace = true
 language.workspace = true
 log.workspace = true
@@ -29,6 +28,9 @@ text.workspace = true
 tracing.workspace = true
 util.workspace = true
 ztracing.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+git2.workspace = true
 
 [dev-dependencies]
 ctor.workspace = true

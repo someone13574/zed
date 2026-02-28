@@ -18,12 +18,14 @@ collections.workspace = true
 convert_case.workspace = true
 log.workspace = true
 streaming-iterator.workspace = true
-tree-sitter-json.workspace = true
-tree-sitter.workspace = true
 serde_json_lenient.workspace = true
 serde_json.workspace = true
 settings_content.workspace = true
 settings_json.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+tree-sitter-json.workspace = true
+tree-sitter.workspace = true
 
 [dev-dependencies]
 pretty_assertions.workspace = true

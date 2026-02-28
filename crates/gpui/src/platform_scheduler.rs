@@ -51,8 +51,33 @@ impl Scheduler for PlatformScheduler {
     ) -> bool {
         #[cfg(target_family = "wasm")]
         {
-            let _ = (&future, &timeout);
-            panic!("Cannot block on wasm")
+            // On WASM there are no threads to park, so we cannot truly block.
+            // Poll the future exactly once with a no-op waker:
+            //   - Poll::Ready  → the future was already done; return true.
+            //   - Poll::Pending with a timeout → the caller will treat this as a
+            //     timeout and fall back to an async path (e.g. WrapMap::flush_edits).
+            //   - Poll::Pending without a timeout → there is no fallback and we
+            //     would deadlock, so panic.
+            use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+            static VTABLE: RawWakerVTable = RawWakerVTable::new(
+                |data| RawWaker::new(data, &VTABLE),
+                |_| {},
+                |_| {},
+                |_| {},
+            );
+            let waker =
+                unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) };
+            let mut cx = Context::from_waker(&waker);
+            match future.as_mut().poll(&mut cx) {
+                Poll::Ready(()) => return true,
+                Poll::Pending => {
+                    if timeout.is_some() {
+                        // Signal "timed out" so the caller can use its async fallback.
+                        return false;
+                    }
+                    panic!("Cannot block on wasm: future did not resolve immediately");
+                }
+            }
         }
         #[cfg(not(target_family = "wasm"))]
         {

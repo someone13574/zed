@@ -5,8 +5,11 @@ use remote::RemoteClient;
 use rpc::proto::{self, REMOTE_SERVER_PROJECT_ID};
 use std::{collections::VecDeque, path::Path, sync::Arc};
 use task::{Shell, shell_to_proto};
+#[cfg(not(target_family = "wasm"))]
 use terminal::terminal_settings::TerminalSettings;
-use util::{ResultExt, command::new_command, rel_path::RelPath};
+use util::{ResultExt, command::new_command};
+#[cfg(not(target_family = "wasm"))]
+use util::rel_path::RelPath;
 use worktree::Worktree;
 
 use collections::HashMap;
@@ -135,6 +138,7 @@ impl ProjectEnvironment {
                 Some(self.local_directory_environment(&Shell::System, abs_path, cx))
             }
             None => Some({
+                #[cfg(not(target_family = "wasm"))]
                 let shell = TerminalSettings::get(
                     Some(settings::SettingsLocation {
                         worktree_id: worktree.id(),
@@ -144,6 +148,8 @@ impl ProjectEnvironment {
                 )
                 .shell
                 .clone();
+                #[cfg(target_family = "wasm")]
+                let shell = Shell::System;
 
                 self.local_directory_environment(&shell, abs_path, cx)
             }),
@@ -176,6 +182,7 @@ impl ProjectEnvironment {
                 })
                 .ok()
                 .map(|worktree| {
+                    #[cfg(not(target_family = "wasm"))]
                     let shell = terminal::terminal_settings::TerminalSettings::get(
                         worktree
                             .as_ref()
@@ -187,6 +194,8 @@ impl ProjectEnvironment {
                     )
                     .shell
                     .clone();
+                    #[cfg(target_family = "wasm")]
+                    let shell = Shell::System;
 
                     self.local_directory_environment(&shell, abs_path, cx)
                 }),
@@ -345,7 +354,9 @@ async fn load_directory_shell_environment(
             .into()
     };
 
+    #[cfg(not(target_family = "wasm"))]
     let (shell, args) = shell.program_and_args();
+    #[cfg(not(target_family = "wasm"))]
     let mut envs = util::shell_env::capture(shell.clone(), args, abs_path)
         .await
         .with_context(|| {
@@ -353,6 +364,8 @@ async fn load_directory_shell_environment(
                 .ok();
             format!("capturing shell environment with {shell:?}")
         })?;
+    #[cfg(target_family = "wasm")]
+    let mut envs = HashMap::default();
 
     if cfg!(target_os = "windows")
         && let Some(path) = envs.remove("Path")

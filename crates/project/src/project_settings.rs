@@ -1406,7 +1406,10 @@ impl SettingsObserver {
     ) -> Task<()> {
         let (mut user_tasks_file_rx, watcher_task) =
             watch_config_file(cx.background_executor(), fs, file_path.clone());
+        #[cfg(not(target_family = "wasm"))]
         let user_tasks_content = cx.foreground_executor().block_on(user_tasks_file_rx.next());
+        #[cfg(target_family = "wasm")]
+        let user_tasks_content: Option<String> = None;
         let weak_entry = cx.weak_entity();
         cx.spawn(async move |settings_observer, cx| {
             let _watcher_task = watcher_task;
@@ -1458,7 +1461,10 @@ impl SettingsObserver {
     ) -> Task<()> {
         let (mut user_tasks_file_rx, watcher_task) =
             watch_config_file(cx.background_executor(), fs, file_path.clone());
+        #[cfg(not(target_family = "wasm"))]
         let user_tasks_content = cx.foreground_executor().block_on(user_tasks_file_rx.next());
+        #[cfg(target_family = "wasm")]
+        let user_tasks_content: Option<String> = None;
         let weak_entry = cx.weak_entity();
         cx.spawn(async move |settings_observer, cx| {
             let _watcher_task = watcher_task;

@@ -9,6 +9,7 @@ use crate::{
     worktree_store::{WorktreeStore, WorktreeStoreEvent},
 };
 use anyhow::{Context as _, Result, anyhow, bail};
+#[cfg(not(target_family = "wasm"))]
 use askpass::{AskPassDelegate, EncryptedPassword, IKnowWhatIAmDoingAndIHaveReadTheDocs};
 use buffer_diff::{BufferDiff, BufferDiffEvent};
 use client::ProjectId;
@@ -29,10 +30,10 @@ use git::{
     blame::Blame,
     parse_git_remote_url,
     repository::{
-        Branch, CommitDetails, CommitDiff, CommitFile, CommitOptions, DiffType, FetchOptions,
-        GitRepository, GitRepositoryCheckpoint, GraphCommitData, InitialGraphCommitData, LogOrder,
-        LogSource, PushOptions, Remote, RemoteCommandOutput, RepoPath, ResetMode,
-        UpstreamTrackingStatus, Worktree as GitWorktree,
+        AskPassDelegate, Branch, CommitDetails, CommitDiff, CommitFile, CommitOptions, DiffType,
+        FetchOptions, GitRepository, GitRepositoryCheckpoint, GraphCommitData,
+        InitialGraphCommitData, LogOrder, LogSource, PushOptions, Remote, RemoteCommandOutput,
+        RepoPath, ResetMode, UpstreamTrackingStatus, Worktree as GitWorktree,
     },
     stash::{GitStash, StashEntry},
     status::{
@@ -70,9 +71,9 @@ use std::{
         Arc,
         atomic::{self, AtomicU64},
     },
-    time::Instant,
 };
 use sum_tree::{Edit, SumTree, TreeSet};
+use web_time::Instant;
 use task::Shell;
 use text::{Bias, BufferId};
 use util::{
@@ -85,6 +86,7 @@ use worktree::{
     File, PathChange, PathKey, PathProgress, PathSummary, PathTarget, ProjectEntryId,
     UpdatedGitRepositoriesSet, UpdatedGitRepository, Worktree,
 };
+#[cfg(not(target_family = "wasm"))]
 use zeroize::Zeroize;
 
 pub struct GitStore {
@@ -2615,6 +2617,7 @@ impl GitStore {
         })
     }
 
+    #[cfg(not(target_family = "wasm"))]
     async fn handle_askpass(
         this: Entity<Self>,
         envelope: TypedEnvelope<proto::AskPassRequest>,
@@ -2642,6 +2645,15 @@ impl GitStore {
         Ok(proto::AskPassResponse {
             response: response.decrypt(IKnowWhatIAmDoingAndIHaveReadTheDocs)?,
         })
+    }
+
+    #[cfg(target_family = "wasm")]
+    async fn handle_askpass(
+        _this: Entity<Self>,
+        _envelope: TypedEnvelope<proto::AskPassRequest>,
+        _cx: AsyncApp,
+    ) -> Result<proto::AskPassResponse> {
+        anyhow::bail!("askpass is unavailable on wasm");
     }
 
     async fn handle_check_for_pushed_commits(
@@ -3442,6 +3454,7 @@ impl BufferGitState {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn make_remote_delegate(
     this: Entity<GitStore>,
     project_id: u64,
@@ -3470,6 +3483,17 @@ fn make_remote_delegate(
             .detach_and_log_err(cx);
         });
     })
+}
+
+#[cfg(target_family = "wasm")]
+fn make_remote_delegate(
+    _this: Entity<GitStore>,
+    _project_id: u64,
+    _repository_id: RepositoryId,
+    _askpass_id: u64,
+    _cx: &mut AsyncApp,
+) -> AskPassDelegate {
+    AskPassDelegate::default()
 }
 
 impl RepositoryId {

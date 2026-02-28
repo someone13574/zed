@@ -28,6 +28,7 @@ use anyhow::{Context as _, Result};
 use async_trait::async_trait;
 use collections::{HashMap, HashSet, IndexSet};
 use futures::Future;
+use futures::FutureExt as _;
 use futures::future::LocalBoxFuture;
 use futures::lock::OwnedMutexGuard;
 use gpui::{App, AsyncApp, Entity, SharedString};
@@ -47,7 +48,6 @@ use semver::Version;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use serde_json::Value;
 use settings::WorktreeId;
-use smol::future::FutureExt as _;
 use std::num::NonZeroU32;
 use std::{
     ffi::OsStr,
@@ -75,7 +75,9 @@ pub use toolchain::{
     LanguageToolchainStore, LocalLanguageToolchainStore, Toolchain, ToolchainList, ToolchainLister,
     ToolchainMetadata, ToolchainScope,
 };
-use tree_sitter::{self, Query, QueryCursor, WasmStore, wasmtime};
+use tree_sitter::{self, Query, QueryCursor};
+#[cfg(not(target_family = "wasm"))]
+use tree_sitter::{WasmStore, wasmtime};
 use util::rel_path::RelPath;
 use util::serde::default_true;
 
@@ -103,11 +105,19 @@ where
     F: FnOnce(&mut Parser) -> R,
 {
     let mut parser = PARSERS.lock().pop().unwrap_or_else(|| {
-        let mut parser = Parser::new();
-        parser
-            .set_wasm_store(WasmStore::new(&WASM_ENGINE).unwrap())
-            .unwrap();
-        parser
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let mut parser = Parser::new();
+            parser
+                .set_wasm_store(WasmStore::new(&WASM_ENGINE).unwrap())
+                .unwrap();
+            parser
+        }
+
+        #[cfg(target_family = "wasm")]
+        {
+            Parser::new()
+        }
     });
     parser.set_included_ranges(&[]).unwrap();
     let result = func(&mut parser);
@@ -125,6 +135,7 @@ where
 
 static NEXT_LANGUAGE_ID: AtomicUsize = AtomicUsize::new(0);
 static NEXT_GRAMMAR_ID: AtomicUsize = AtomicUsize::new(0);
+#[cfg(not(target_family = "wasm"))]
 static WASM_ENGINE: LazyLock<wasmtime::Engine> = LazyLock::new(|| {
     wasmtime::Engine::new(&wasmtime::Config::new()).expect("Failed to create Wasmtime engine")
 });

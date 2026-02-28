@@ -66,6 +66,7 @@ theme.workspace = true
 ui.workspace = true
 util.workspace = true
 uuid.workspace = true
+web-time.workspace = true
 zed_actions.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]

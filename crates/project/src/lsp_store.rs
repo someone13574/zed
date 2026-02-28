@@ -129,10 +129,11 @@ use std::{
         Arc,
         atomic::{self, AtomicUsize},
     },
-    time::{Duration, Instant},
+    time::Duration,
     vec,
 };
 use sum_tree::Dimensions;
+use web_time::Instant;
 use text::{Anchor, BufferId, LineEnding, OffsetRangeExt, ToPoint as _};
 
 use util::{
@@ -825,7 +826,7 @@ impl LocalLspStore {
                             {
                                 let buffer = params
                                     .uri
-                                    .to_file_path()
+                                    .to_file_path_ext(PathStyle::local())
                                     .map(|file_path| this.get_buffer(&file_path, cx))
                                     .ok()
                                     .flatten();
@@ -1541,7 +1542,7 @@ impl LocalLspStore {
                     .start_transaction()
                     .context("transaction already open")?;
                 buffer.end_transaction(cx);
-                let transaction_id = buffer.push_empty_transaction(cx.background_executor().now());
+                let transaction_id = buffer.push_empty_transaction(Instant::now());
                 buffer.finalize_last_transaction();
                 anyhow::Ok(transaction_id)
             })?;
@@ -1986,7 +1987,11 @@ impl LocalLspStore {
                                         continue 'actions;
                                     }
                                 };
-                                let Ok(file_path) = op.text_document.uri.to_file_path() else {
+                                let Ok(file_path) = op
+                                    .text_document
+                                    .uri
+                                    .to_file_path_ext(PathStyle::local())
+                                else {
                                     zlog::warn!(
                                         logger =>
                                         "Failed to convert URI '{:?}' to file path. Skipping {}",
@@ -2689,6 +2694,10 @@ impl LocalLspStore {
         only_register_servers: HashSet<LanguageServerSelector>,
         cx: &mut Context<LspStore>,
     ) {
+        // No language servers on WASM.
+        if cfg!(target_family = "wasm") {
+            return;
+        }
         let buffer = buffer_handle.read(cx);
         let buffer_id = buffer.remote_id();
 
@@ -3256,7 +3265,7 @@ impl LocalLspStore {
                 lsp::DocumentChangeOperation::Op(lsp::ResourceOp::Create(op)) => {
                     let abs_path = op
                         .uri
-                        .to_file_path()
+                        .to_file_path_ext(PathStyle::local())
                         .map_err(|()| anyhow!("can't convert URI to path"))?;
 
                     if let Some(parent_path) = abs_path.parent() {
@@ -3281,11 +3290,11 @@ impl LocalLspStore {
                 lsp::DocumentChangeOperation::Op(lsp::ResourceOp::Rename(op)) => {
                     let source_abs_path = op
                         .old_uri
-                        .to_file_path()
+                        .to_file_path_ext(PathStyle::local())
                         .map_err(|()| anyhow!("can't convert URI to path"))?;
                     let target_abs_path = op
                         .new_uri
-                        .to_file_path()
+                        .to_file_path_ext(PathStyle::local())
                         .map_err(|()| anyhow!("can't convert URI to path"))?;
 
                     let options = fs::RenameOptions {
@@ -3309,7 +3318,7 @@ impl LocalLspStore {
                 lsp::DocumentChangeOperation::Op(lsp::ResourceOp::Delete(op)) => {
                     let abs_path = op
                         .uri
-                        .to_file_path()
+                        .to_file_path_ext(PathStyle::local())
                         .map_err(|()| anyhow!("can't convert URI to path"))?;
                     let options = op
                         .options
@@ -3591,7 +3600,7 @@ impl LocalLspStore {
                             lsp::OneOf::Left(workspace_folder) => &workspace_folder.uri,
                             lsp::OneOf::Right(base_uri) => base_uri,
                         }
-                        .to_file_path() else {
+                        .to_file_path_ext(PathStyle::local()) else {
                             continue;
                         };
 
@@ -3678,7 +3687,7 @@ impl LocalLspStore {
                         lsp::OneOf::Left(workspace_folder) => &workspace_folder.uri,
                         lsp::OneOf::Right(base_uri) => base_uri,
                     }
-                    .to_file_path()
+                    .to_file_path_ext(path_style)
                     .ok()?;
                     let relative = base_uri.strip_prefix(&worktree_root_path).ok()?;
                     let mut literal_prefix = relative.to_owned();
@@ -5023,7 +5032,7 @@ impl LspStore {
                                 title: None,
                                 message: status.clone(),
                                 percentage: None,
-                                last_update_at: cx.background_executor().now(),
+                                last_update_at: Instant::now(),
                             },
                             cx,
                         );
@@ -7545,7 +7554,7 @@ impl LspStore {
                 let (lsp_adapter, server) = match local.language_servers.get(&state.id) {
                     Some(LanguageServerState::Running {
                         adapter, server, ..
-                    }) => (adapter.clone(), server),
+                    }) => (adapter.clone(), server.clone()),
 
                     _ => continue,
                 };
@@ -7563,70 +7572,69 @@ impl LspStore {
 
                 let worktree_handle = worktree_handle.clone();
                 let server_id = server.server_id();
-                requests.push(
-                    server
+                let query = query.to_string();
+                requests.push(async move {
+                    let response = server
                         .request::<lsp::request::WorkspaceSymbolRequest>(
                             lsp::WorkspaceSymbolParams {
-                                query: query.to_string(),
+                                query,
                                 ..Default::default()
                             },
                             request_timeout,
                         )
-                        .map(move |response| {
-                            let lsp_symbols = response
-                                .into_response()
-                                .context("workspace symbols request")
-                                .log_err()
-                                .flatten()
-                                .map(|symbol_response| match symbol_response {
-                                    lsp::WorkspaceSymbolResponse::Flat(flat_responses) => {
-                                        flat_responses
-                                            .into_iter()
-                                            .map(|lsp_symbol| {
-                                                (
-                                                    lsp_symbol.name,
-                                                    lsp_symbol.kind,
-                                                    lsp_symbol.location,
-                                                    lsp_symbol.container_name,
-                                                )
-                                            })
-                                            .collect::<Vec<_>>()
-                                    }
-                                    lsp::WorkspaceSymbolResponse::Nested(nested_responses) => {
-                                        nested_responses
-                                            .into_iter()
-                                            .filter_map(|lsp_symbol| {
-                                                let location = match lsp_symbol.location {
-                                                    OneOf::Left(location) => location,
-                                                    OneOf::Right(_) => {
-                                                        log::error!(
-                                                            "Unexpected: client capabilities \
-                                                            forbid symbol resolutions in \
-                                                            workspace.symbol.resolveSupport"
-                                                        );
-                                                        return None;
-                                                    }
-                                                };
-                                                Some((
-                                                    lsp_symbol.name,
-                                                    lsp_symbol.kind,
-                                                    location,
-                                                    lsp_symbol.container_name,
-                                                ))
-                                            })
-                                            .collect::<Vec<_>>()
-                                    }
-                                })
-                                .unwrap_or_default();
+                        .await;
 
-                            WorkspaceSymbolsResult {
-                                server_id,
-                                lsp_adapter,
-                                worktree: worktree_handle.downgrade(),
-                                lsp_symbols,
+                    let lsp_symbols = response
+                        .into_response()
+                        .context("workspace symbols request")
+                        .log_err()
+                        .flatten()
+                        .map(|symbol_response| match symbol_response {
+                            lsp::WorkspaceSymbolResponse::Flat(flat_responses) => flat_responses
+                                .into_iter()
+                                .map(|lsp_symbol| {
+                                    (
+                                        lsp_symbol.name,
+                                        lsp_symbol.kind,
+                                        lsp_symbol.location,
+                                        lsp_symbol.container_name,
+                                    )
+                                })
+                                .collect::<Vec<_>>(),
+                            lsp::WorkspaceSymbolResponse::Nested(nested_responses) => {
+                                nested_responses
+                                    .into_iter()
+                                    .filter_map(|lsp_symbol| {
+                                        let location = match lsp_symbol.location {
+                                            OneOf::Left(location) => location,
+                                            OneOf::Right(_) => {
+                                                log::error!(
+                                                    "Unexpected: client capabilities \
+                                                    forbid symbol resolutions in \
+                                                    workspace.symbol.resolveSupport"
+                                                );
+                                                return None;
+                                            }
+                                        };
+                                        Some((
+                                            lsp_symbol.name,
+                                            lsp_symbol.kind,
+                                            location,
+                                            lsp_symbol.container_name,
+                                        ))
+                                    })
+                                    .collect::<Vec<_>>()
                             }
-                        }),
-                );
+                        })
+                        .unwrap_or_default();
+
+                    WorkspaceSymbolsResult {
+                        server_id,
+                        lsp_adapter,
+                        worktree: worktree_handle.downgrade(),
+                        lsp_symbols,
+                    }
+                });
             }
 
             cx.spawn(async move |this, cx| {
@@ -7644,7 +7652,10 @@ impl LspStore {
                             .into_iter()
                             .filter_map(
                                 |(symbol_name, symbol_kind, symbol_location, container_name)| {
-                                    let abs_path = symbol_location.uri.to_file_path().ok()?;
+                                    let abs_path = symbol_location
+                                        .uri
+                                        .to_file_path_ext(PathStyle::local())
+                                        .ok()?;
                                     let source_worktree = result.worktree.upgrade()?;
                                     let source_worktree_id = source_worktree.read(cx).id();
 
@@ -9403,7 +9414,7 @@ impl LspStore {
                             is_cancellable: payload.is_cancellable.unwrap_or(false),
                             message: payload.message,
                             percentage: payload.percentage.map(|p| p as usize),
-                            last_update_at: cx.background_executor().now(),
+                            last_update_at: Instant::now(),
                         },
                         cx,
                     );
@@ -9419,7 +9430,7 @@ impl LspStore {
                             is_cancellable: payload.is_cancellable.unwrap_or(false),
                             message: payload.message,
                             percentage: payload.percentage.map(|p| p as usize),
-                            last_update_at: cx.background_executor().now(),
+                            last_update_at: Instant::now(),
                         },
                         cx,
                     );
@@ -9915,7 +9926,7 @@ impl LspStore {
                         is_cancellable: report.cancellable.unwrap_or(false),
                         message: report.message.clone(),
                         percentage: report.percentage.map(|p| p as usize),
-                        last_update_at: cx.background_executor().now(),
+                        last_update_at: Instant::now(),
                     },
                     cx,
                 );
@@ -9929,7 +9940,7 @@ impl LspStore {
                     is_cancellable: report.cancellable.unwrap_or(false),
                     message: report.message,
                     percentage: report.percentage.map(|p| p as usize),
-                    last_update_at: cx.background_executor().now(),
+                    last_update_at: Instant::now(),
                 },
                 cx,
             ),
@@ -11075,7 +11086,11 @@ impl LspStore {
         let updates = lsp_diagnostics
             .into_iter()
             .filter_map(|update| {
-                let abs_path = update.diagnostics.uri.to_file_path().ok()?;
+                let abs_path = update
+                    .diagnostics
+                    .uri
+                    .to_file_path_ext(PathStyle::local())
+                    .ok()?;
                 Some(DocumentDiagnosticsUpdate {
                     diagnostics: self.lsp_to_document_diagnostics(
                         abs_path,
@@ -12140,7 +12155,7 @@ impl LspStore {
                             .to_vec(),
                     );
 
-                    let Some(abs_path) = uri.to_file_path().ok() else {
+                    let Some(abs_path) = uri.to_file_path_ext(PathStyle::local()).ok() else {
                         return acc;
                     };
                     let Some((worktree, relative_path)) =
@@ -13183,7 +13198,7 @@ fn lsp_workspace_diagnostics_refresh(
                 };
 
                 progress_rx.try_recv().ok();
-                let timer = server.request_timer(timeout).fuse();
+                let timer = pin!(server.request_timer(timeout).fuse());
                 let progress = pin!(progress_rx.recv().fuse());
                 let response_result = server
                     .request_with_timer::<lsp::WorkspaceDiagnosticRequest, _>(

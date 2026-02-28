@@ -12,6 +12,7 @@ use time::UtcOffset;
 use time::macros::format_description;
 use util::command::Stdio;
 
+#[cfg(not(target_family = "wasm"))]
 pub use git2 as libgit;
 
 #[derive(Debug, Clone, Default)]

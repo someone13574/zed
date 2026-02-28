@@ -8,6 +8,7 @@ use futures::channel::oneshot;
 use futures::future::BoxFuture;
 use futures::io::BufWriter;
 use futures::{AsyncWriteExt, FutureExt as _, select_biased};
+#[cfg(not(target_family = "wasm"))]
 use git2::{BranchType, ErrorCode};
 use gpui::{AppContext as _, AsyncApp, BackgroundExecutor, SharedString, Task};
 use parking_lot::Mutex;
@@ -958,6 +959,7 @@ impl std::fmt::Debug for dyn GitRepository {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub struct RealGitRepository {
     pub repository: Arc<Mutex<git2::Repository>>,
     pub system_git_binary_path: Option<PathBuf>,
@@ -966,6 +968,7 @@ pub struct RealGitRepository {
     executor: BackgroundExecutor,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl RealGitRepository {
     pub fn new(
         dotgit_path: &Path,
@@ -1062,6 +1065,7 @@ pub async fn get_git_committer(cx: &AsyncApp) -> GitCommitter {
     .await
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl GitRepository for RealGitRepository {
     fn reload_index(&self) {
         if let Ok(mut index) = self.repository.lock().index() {

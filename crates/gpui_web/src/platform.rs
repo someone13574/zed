@@ -11,9 +11,10 @@ use gpui::{
     ThermalState, WindowAppearance, WindowParams,
 };
 use gpui_wgpu::WgpuContext;
+use wasm_bindgen::JsCast;
 use std::{
     borrow::Cow,
-    cell::RefCell,
+    cell::{Cell, RefCell},
     path::{Path, PathBuf},
     rc::Rc,
     sync::Arc,
@@ -338,4 +339,84 @@ impl Platform for WebPlatform {
     fn on_keyboard_layout_change(&self, callback: Box<dyn FnMut()>) {
         self.callbacks.borrow_mut().keyboard_layout_change = Some(callback);
     }
+}
+
+/// Shows a browser file picker and returns selected files as `(filename, bytes)` pairs.
+/// Returns `None` if the user cancels or no files are selected.
+pub async fn pick_browser_files(multiple: bool) -> Option<Vec<(String, Vec<u8>)>> {
+    let window = web_sys::window()?;
+    let document = window.document()?;
+
+    let input: web_sys::HtmlInputElement = document
+        .create_element("input")
+        .ok()?
+        .dyn_into()
+        .ok()?;
+    input.set_attribute("type", "file").ok()?;
+    input.style().set_property("display", "none").ok()?;
+    if multiple {
+        input.set_multiple(true);
+    }
+
+    let (file_tx, file_rx) = oneshot::channel::<Vec<web_sys::File>>();
+    let file_tx = Rc::new(Cell::new(Some(file_tx)));
+
+    // Fires when the user confirms file selection.
+    {
+        let file_tx = file_tx.clone();
+        let input_ref = input.clone();
+        let closure = wasm_bindgen::closure::Closure::once(move |_: web_sys::Event| {
+            let mut files = Vec::new();
+            if let Some(file_list) = input_ref.files() {
+                for i in 0..file_list.length() {
+                    if let Some(f) = file_list.get(i) {
+                        files.push(f);
+                    }
+                }
+            }
+            if let Some(tx) = file_tx.take() {
+                tx.send(files).ok();
+            }
+        });
+        input
+            .add_event_listener_with_callback("change", closure.as_ref().unchecked_ref())
+            .ok()?;
+        closure.forget();
+    }
+
+    // Fires when the user cancels (Chrome 113+, Firefox, Safari 16.4+).
+    {
+        let file_tx = file_tx.clone();
+        let closure = wasm_bindgen::closure::Closure::once(move |_: web_sys::Event| {
+            if let Some(tx) = file_tx.take() {
+                tx.send(Vec::new()).ok();
+            }
+        });
+        input
+            .add_event_listener_with_callback("cancel", closure.as_ref().unchecked_ref())
+            .ok()?;
+        closure.forget();
+    }
+
+    if let Some(body) = document.body() {
+        body.append_child(&input).ok()?;
+    }
+    input.click();
+
+    let browser_files = file_rx.await.ok()?;
+    if browser_files.is_empty() {
+        return None;
+    }
+
+    let mut result = Vec::new();
+    for file in browser_files {
+        let name = file.name();
+        let array_buffer = wasm_bindgen_futures::JsFuture::from(file.array_buffer())
+            .await
+            .ok()?;
+        let bytes = js_sys::Uint8Array::new(&array_buffer).to_vec();
+        result.push((name, bytes));
+    }
+
+    Some(result)
 }

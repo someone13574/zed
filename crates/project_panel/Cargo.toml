@@ -23,7 +23,6 @@ command_palette_hooks.workspace = true
 db.workspace = true
 editor.workspace = true
 file_icons.workspace = true
-git_ui.workspace = true
 git.workspace = true
 gpui.workspace = true
 itertools.workspace = true
@@ -37,7 +36,6 @@ serde_json.workspace = true
 settings.workspace = true
 smallvec.workspace = true
 theme.workspace = true
-rayon.workspace = true
 ui.workspace = true
 util.workspace = true
 client.workspace = true
@@ -46,7 +44,12 @@ workspace.workspace = true
 language.workspace = true
 zed_actions.workspace = true
 telemetry.workspace = true
+web-time.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+git_ui.workspace = true
 notifications.workspace = true
+rayon.workspace = true
 
 [dev-dependencies]
 client = { workspace = true, features = ["test-support"] }

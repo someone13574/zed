@@ -1,13 +1,21 @@
+#[cfg(not(target_family = "wasm"))]
 use std::ffi::{CStr, CString, c_int};
+#[cfg(not(target_family = "wasm"))]
 use std::marker::PhantomData;
+#[cfg(not(target_family = "wasm"))]
 use std::{ptr, slice, str};
 
+#[cfg(not(target_family = "wasm"))]
 use anyhow::{Context as _, Result, bail};
+#[cfg(not(target_family = "wasm"))]
 use libsqlite3_sys::*;
 
+#[cfg(not(target_family = "wasm"))]
 use crate::bindable::{Bind, Column};
+#[cfg(not(target_family = "wasm"))]
 use crate::connection::Connection;
 
+#[cfg(not(target_family = "wasm"))]
 pub struct Statement<'a> {
     /// vector of pointers to the raw SQLite statement objects.
     /// it holds the actual prepared statements that will be executed.
@@ -20,6 +28,9 @@ pub struct Statement<'a> {
     ///Indicates that the `Statement` struct is tied to the lifetime of the SQLite statement
     phantom: PhantomData<sqlite3_stmt>,
 }
+
+#[cfg(target_family = "wasm")]
+pub struct Statement<'a>(std::marker::PhantomData<&'a ()>);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum StepResult {
@@ -36,6 +47,101 @@ pub enum SqlType {
     Null,
 }
 
+#[cfg(target_family = "wasm")]
+impl<'a> Statement<'a> {
+    pub fn prepare<T: AsRef<str>>(
+        _connection: &'a crate::connection::Connection,
+        _query: T,
+    ) -> anyhow::Result<Self> {
+        Ok(Statement(std::marker::PhantomData))
+    }
+
+    pub fn bind_blob(&self, _index: i32, _blob: &[u8]) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    pub fn bind_double(&self, _index: i32, _double: f64) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    pub fn bind_int(&self, _index: i32, _int: i32) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    pub fn bind_int64(&self, _index: i32, _int: i64) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    pub fn bind_null(&self, _index: i32) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    pub fn bind_text(&self, _index: i32, _text: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    pub fn column_blob(&mut self, _index: i32) -> anyhow::Result<&[u8]> {
+        Ok(&[])
+    }
+
+    pub fn column_double(&self, _index: i32) -> anyhow::Result<f64> {
+        Ok(0.0)
+    }
+
+    pub fn column_int(&self, _index: i32) -> anyhow::Result<i32> {
+        Ok(0)
+    }
+
+    pub fn column_int64(&self, _index: i32) -> anyhow::Result<i64> {
+        Ok(0)
+    }
+
+    pub fn column_text(&mut self, _index: i32) -> anyhow::Result<&str> {
+        Ok("")
+    }
+
+    pub fn column_type(&mut self, _index: i32) -> anyhow::Result<SqlType> {
+        Ok(SqlType::Null)
+    }
+
+    pub fn bind<T: crate::bindable::Bind>(&self, value: &T, index: i32) -> anyhow::Result<i32> {
+        value.bind(self, index)
+    }
+
+    pub fn column<T: crate::bindable::Column>(&mut self) -> anyhow::Result<T> {
+        Ok(T::column(self, 0)?.0)
+    }
+
+    pub fn with_bindings(
+        &mut self,
+        _bindings: &impl crate::bindable::Bind,
+    ) -> anyhow::Result<&mut Self> {
+        Ok(self)
+    }
+
+    pub fn exec(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    pub fn map<R>(
+        &mut self,
+        _callback: impl FnMut(&mut Statement) -> anyhow::Result<R>,
+    ) -> anyhow::Result<Vec<R>> {
+        Ok(vec![])
+    }
+
+    pub fn rows<R: crate::bindable::Column>(&mut self) -> anyhow::Result<Vec<R>> {
+        Ok(vec![])
+    }
+
+    pub fn maybe_row<R: crate::bindable::Column>(&mut self) -> anyhow::Result<Option<R>> {
+        Ok(None)
+    }
+
+    pub fn reset(&mut self) {}
+}
+
+#[cfg(not(target_family = "wasm"))]
 impl<'a> Statement<'a> {
     pub fn prepare<T: AsRef<str>>(connection: &'a Connection, query: T) -> Result<Self> {
         let mut statement = Self {
@@ -381,6 +487,7 @@ impl<'a> Statement<'a> {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Drop for Statement<'_> {
     fn drop(&mut self) {
         unsafe {

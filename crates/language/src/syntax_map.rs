@@ -14,9 +14,10 @@ use std::{
     fmt, iter,
     ops::{ControlFlow, Deref, DerefMut, Range},
     sync::Arc,
-    time::{Duration, Instant},
+    time::Duration,
 };
 use streaming_iterator::StreamingIterator;
+use web_time::Instant;
 use sum_tree::{Bias, Dimensions, SeekTarget, SumTree};
 use text::{Anchor, BufferSnapshot, OffsetRangeExt, Point, Rope, ToOffset, ToPoint};
 use tree_sitter::{

@@ -88,19 +88,22 @@ snippet_provider.workspace = true
 sum_tree.workspace = true
 task.workspace = true
 tempfile.workspace = true
-terminal.workspace = true
 text.workspace = true
 toml.workspace = true
 url.workspace = true
 util.workspace = true
 watch.workspace = true
 wax.workspace = true
+web-time.workspace = true
 which.workspace = true
 worktree.workspace = true
 zeroize.workspace = true
 zlog.workspace = true
 ztracing.workspace = true
 tracing.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+terminal.workspace = true
 
 [dev-dependencies]
 client = { workspace = true, features = ["test-support"] }

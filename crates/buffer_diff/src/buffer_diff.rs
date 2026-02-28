@@ -1,10 +1,13 @@
 use futures::channel::oneshot;
+#[cfg(not(target_family = "wasm"))]
 use git2::{DiffLineType as GitDiffLineType, DiffOptions as GitOptions, Patch as GitPatch};
 use gpui::{App, AppContext as _, Context, Entity, EventEmitter, Task};
 use language::{
     Capability, Diff, DiffOptions, File, Language, LanguageName, LanguageRegistry,
     language_settings::language_settings, word_diff_ranges,
 };
+#[cfg(target_family = "wasm")]
+use language::line_diff;
 use rope::Rope;
 use std::{
     cmp::Ordering,
@@ -1092,17 +1095,6 @@ fn compute_hunks(
     if let Some((diff_base, diff_base_rope)) = diff_base {
         let buffer_text = buffer.as_rope().to_string();
 
-        let mut options = GitOptions::default();
-        options.context_lines(0);
-        let patch = GitPatch::from_buffers(
-            diff_base.as_bytes(),
-            None,
-            buffer_text.as_bytes(),
-            None,
-            Some(&mut options),
-        )
-        .log_err();
-
         // A common case in Zed is that the empty buffer is represented as just a newline,
         // but if we just compute a naive diff you get a "preserved" line in the middle,
         // which is a bit odd.
@@ -1119,18 +1111,93 @@ fn compute_hunks(
             return tree;
         }
 
-        if let Some(patch) = patch {
-            let mut divergence = 0;
-            for hunk_index in 0..patch.num_hunks() {
-                let hunk = process_patch_hunk(
-                    &patch,
-                    hunk_index,
-                    &diff_base_rope,
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let mut options = GitOptions::default();
+            options.context_lines(0);
+            let patch = GitPatch::from_buffers(
+                diff_base.as_bytes(),
+                None,
+                buffer_text.as_bytes(),
+                None,
+                Some(&mut options),
+            )
+            .log_err();
+
+            if let Some(patch) = patch {
+                let mut divergence = 0;
+                for hunk_index in 0..patch.num_hunks() {
+                    let hunk = process_patch_hunk(
+                        &patch,
+                        hunk_index,
+                        &diff_base_rope,
+                        buffer,
+                        &mut divergence,
+                        diff_options.as_ref(),
+                    );
+                    tree.push(hunk, buffer);
+                }
+            }
+        }
+
+        #[cfg(target_family = "wasm")]
+        {
+            for (old_row_range, new_row_range) in line_diff(&diff_base, &buffer_text) {
+                let diff_base_start = diff_base_rope.point_to_offset(Point::new(old_row_range.start, 0));
+                let diff_base_end = diff_base_rope.point_to_offset(Point::new(old_row_range.end, 0));
+                let diff_base_byte_range = diff_base_start..diff_base_end;
+
+                let buffer_start = Point::new(new_row_range.start, 0);
+                let buffer_end = Point::new(new_row_range.end, 0);
+                let buffer_range = buffer.anchor_before(buffer_start)..buffer.anchor_before(buffer_end);
+
+                let base_line_count = (old_row_range.end - old_row_range.start) as usize;
+                let buffer_line_count = (new_row_range.end - new_row_range.start) as usize;
+
+                let (base_word_diffs, buffer_word_diffs) = if let Some(diff_options) = diff_options.as_ref()
+                    && base_line_count > 0
+                    && base_line_count == buffer_line_count
+                    && diff_options.max_word_diff_line_count >= base_line_count
+                {
+                    let base_text: String = diff_base_rope
+                        .chunks_in_range(diff_base_byte_range.clone())
+                        .collect();
+
+                    let buffer_text: String = buffer.text_for_range(buffer_range.clone()).collect();
+
+                    let (base_word_diffs, buffer_word_diffs_relative) = word_diff_ranges(
+                        &base_text,
+                        &buffer_text,
+                        DiffOptions {
+                            language_scope: diff_options.language_scope.clone(),
+                            ..*diff_options
+                        },
+                    );
+
+                    let buffer_start_offset = buffer_range.start.to_offset(buffer);
+                    let buffer_word_diffs = buffer_word_diffs_relative
+                        .into_iter()
+                        .map(|range| {
+                            let start = buffer.anchor_after(buffer_start_offset + range.start);
+                            let end = buffer.anchor_after(buffer_start_offset + range.end);
+                            start..end
+                        })
+                        .collect();
+
+                    (base_word_diffs, buffer_word_diffs)
+                } else {
+                    (Vec::default(), Vec::default())
+                };
+
+                tree.push(
+                    InternalDiffHunk {
+                        buffer_range,
+                        diff_base_byte_range,
+                        base_word_diffs,
+                        buffer_word_diffs,
+                    },
                     buffer,
-                    &mut divergence,
-                    diff_options.as_ref(),
                 );
-                tree.push(hunk, buffer);
             }
         }
     } else {
@@ -1340,6 +1407,7 @@ fn compare_hunks(
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn process_patch_hunk(
     patch: &GitPatch<'_>,
     hunk_index: usize,

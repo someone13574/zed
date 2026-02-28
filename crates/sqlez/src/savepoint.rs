@@ -1,8 +1,12 @@
+#[cfg(not(target_family = "wasm"))]
 use anyhow::Result;
+#[cfg(not(target_family = "wasm"))]
 use indoc::formatdoc;
 
+#[cfg(not(target_family = "wasm"))]
 use crate::connection::Connection;
 
+#[cfg(not(target_family = "wasm"))]
 impl Connection {
     // Run a set of commands within the context of a `SAVEPOINT name`. If the callback
     // returns Err(_), the savepoint will be rolled back. Otherwise, the save
@@ -48,6 +52,30 @@ impl Connection {
             }
         }
         result
+    }
+}
+
+#[cfg(target_family = "wasm")]
+use crate::connection::Connection;
+
+#[cfg(target_family = "wasm")]
+impl Connection {
+    pub fn with_savepoint<R, F>(&self, _name: impl AsRef<str>, f: F) -> anyhow::Result<R>
+    where
+        F: FnOnce() -> anyhow::Result<R>,
+    {
+        f()
+    }
+
+    pub fn with_savepoint_rollback<R, F>(
+        &self,
+        _name: impl AsRef<str>,
+        f: F,
+    ) -> anyhow::Result<Option<R>>
+    where
+        F: FnOnce() -> anyhow::Result<Option<R>>,
+    {
+        f()
     }
 }
 

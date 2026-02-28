@@ -16,9 +16,11 @@ anyhow.workspace = true
 cloud_api_types.workspace = true
 futures.workspace = true
 gpui.workspace = true
-gpui_tokio.workspace = true
 http_client.workspace = true
 parking_lot.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+gpui_tokio.workspace = true
 yawc.workspace = true

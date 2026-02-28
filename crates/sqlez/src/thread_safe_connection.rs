@@ -1,23 +1,35 @@
+#[cfg(not(target_family = "wasm"))]
 use anyhow::Context as _;
+#[cfg(not(target_family = "wasm"))]
 use collections::HashMap;
+#[cfg(not(target_family = "wasm"))]
 use futures::{Future, FutureExt, channel::oneshot};
+#[cfg(not(target_family = "wasm"))]
 use parking_lot::{Mutex, RwLock};
+#[cfg(not(target_family = "wasm"))]
 use std::{
     marker::PhantomData,
     ops::Deref,
     sync::{Arc, LazyLock},
     thread,
 };
+#[cfg(not(target_family = "wasm"))]
 use thread_local::ThreadLocal;
 
+#[cfg(not(target_family = "wasm"))]
 use crate::{connection::Connection, domain::Migrator, util::UnboundedSyncSender};
 
+#[cfg(not(target_family = "wasm"))]
 const MIGRATION_RETRIES: usize = 10;
 
+#[cfg(not(target_family = "wasm"))]
 type QueuedWrite = Box<dyn 'static + Send + FnOnce()>;
+#[cfg(not(target_family = "wasm"))]
 type WriteQueue = Box<dyn 'static + Send + Sync + Fn(QueuedWrite)>;
+#[cfg(not(target_family = "wasm"))]
 type WriteQueueConstructor = Box<dyn 'static + Send + FnMut() -> WriteQueue>;
 
+#[cfg(not(target_family = "wasm"))]
 /// List of queues of tasks by database uri. This lets us serialize writes to the database
 /// and have a single worker thread per db file. This means many thread safe connections
 /// (possibly with different migrations) could all be communicating with the same background
@@ -27,6 +39,7 @@ static QUEUES: LazyLock<RwLock<HashMap<Arc<str>, WriteQueue>>> = LazyLock::new(D
 /// Thread safe connection to a given database file or in memory db. This can be cloned, shared, static,
 /// whatever. It derefs to a synchronous connection by thread that is read only. A write capable connection
 /// may be accessed by passing a callback to the `write` function which will queue the callback
+#[cfg(not(target_family = "wasm"))]
 #[derive(Clone)]
 pub struct ThreadSafeConnection {
     uri: Arc<str>,
@@ -35,9 +48,12 @@ pub struct ThreadSafeConnection {
     connections: Arc<ThreadLocal<Connection>>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 unsafe impl Send for ThreadSafeConnection {}
+#[cfg(not(target_family = "wasm"))]
 unsafe impl Sync for ThreadSafeConnection {}
 
+#[cfg(not(target_family = "wasm"))]
 pub struct ThreadSafeConnectionBuilder<M: Migrator + 'static = ()> {
     db_initialize_query: Option<&'static str>,
     write_queue_constructor: Option<WriteQueueConstructor>,
@@ -45,6 +61,7 @@ pub struct ThreadSafeConnectionBuilder<M: Migrator + 'static = ()> {
     _migrator: PhantomData<*mut M>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl<M: Migrator> ThreadSafeConnectionBuilder<M> {
     /// Sets the query to run every time a connection is opened. This must
     /// be infallible (EG only use pragma statements) and not cause writes.
@@ -123,6 +140,7 @@ impl<M: Migrator> ThreadSafeConnectionBuilder<M> {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl ThreadSafeConnection {
     fn initialize_queues(&self, write_queue_constructor: Option<WriteQueueConstructor>) -> bool {
         if !QUEUES.read().contains_key(&self.uri) {
@@ -212,6 +230,7 @@ impl ThreadSafeConnection {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl ThreadSafeConnection {
     /// Special constructor for ThreadSafeConnection which disallows db initialization and migrations.
     /// This allows construction to be infallible and not write to the db.
@@ -233,6 +252,7 @@ impl ThreadSafeConnection {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Deref for ThreadSafeConnection {
     type Target = Connection;
 
@@ -243,6 +263,7 @@ impl Deref for ThreadSafeConnection {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn background_thread_queue() -> WriteQueueConstructor {
     use std::sync::mpsc::channel;
 
@@ -267,6 +288,7 @@ pub fn background_thread_queue() -> WriteQueueConstructor {
     })
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn locking_queue() -> WriteQueueConstructor {
     Box::new(|| {
         let write_mutex = Mutex::new(());
@@ -277,6 +299,83 @@ pub fn locking_queue() -> WriteQueueConstructor {
     })
 }
 
+// WASM stubs
+
+#[cfg(target_family = "wasm")]
+use crate::{connection::Connection, domain::Migrator};
+
+#[cfg(target_family = "wasm")]
+use std::marker::PhantomData;
+
+#[cfg(target_family = "wasm")]
+#[derive(Clone)]
+pub struct ThreadSafeConnection;
+
+#[cfg(target_family = "wasm")]
+pub struct ThreadSafeConnectionBuilder<M: Migrator + 'static = ()> {
+    _migrator: PhantomData<*mut M>,
+}
+
+#[cfg(target_family = "wasm")]
+impl<M: Migrator> ThreadSafeConnectionBuilder<M> {
+    pub fn with_connection_initialize_query(self, _initialize_query: &'static str) -> Self {
+        self
+    }
+
+    pub fn with_db_initialization_query(self, _initialize_query: &'static str) -> Self {
+        self
+    }
+
+    pub async fn build(self) -> anyhow::Result<ThreadSafeConnection> {
+        Ok(ThreadSafeConnection)
+    }
+}
+
+#[cfg(target_family = "wasm")]
+impl ThreadSafeConnection {
+    pub fn builder<M: Migrator>(
+        _uri: &str,
+        _persistent: bool,
+    ) -> ThreadSafeConnectionBuilder<M> {
+        ThreadSafeConnectionBuilder {
+            _migrator: PhantomData,
+        }
+    }
+
+    pub fn new(
+        _uri: &str,
+        _persistent: bool,
+        _connection_initialize_query: Option<&'static str>,
+        _write_queue_constructor: Option<()>,
+    ) -> Self {
+        ThreadSafeConnection
+    }
+
+    pub fn persistent(&self) -> bool {
+        false
+    }
+
+    pub fn write<T: 'static + Send + Sync>(
+        &self,
+        callback: impl 'static + Send + FnOnce(&Connection) -> T,
+    ) -> impl std::future::Future<Output = T> {
+        let result = callback(self);
+        std::future::ready(result)
+    }
+}
+
+#[cfg(target_family = "wasm")]
+impl std::ops::Deref for ThreadSafeConnection {
+    type Target = Connection;
+
+    fn deref(&self) -> &Self::Target {
+        static CONN: std::sync::LazyLock<Connection> =
+            std::sync::LazyLock::new(|| Connection);
+        &CONN
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
 #[cfg(test)]
 mod test {
     use indoc::indoc;

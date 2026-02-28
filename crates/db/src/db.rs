@@ -3,10 +3,12 @@ pub mod query;
 
 // Re-export
 pub use anyhow;
+pub use futures;
 use anyhow::Context as _;
 use gpui::{App, AppContext};
 pub use indoc::indoc;
 pub use paths::database_dir;
+#[cfg(not(target_family = "wasm"))]
 pub use smol;
 pub use sqlez;
 pub use sqlez_macros;
@@ -43,6 +45,7 @@ pub static ALL_FILE_DB_FAILED: LazyLock<AtomicBool> = LazyLock::new(|| AtomicBoo
 /// This will retry a couple times if there are failures. If opening fails once, the db directory
 /// is moved to a backup folder and a new one is created. If that fails, a shared in memory db is created.
 /// In either case, static variables are set so that the user can be notified.
+#[cfg(not(target_family = "wasm"))]
 pub async fn open_db<M: Migrator + 'static>(db_dir: &Path, scope: &str) -> ThreadSafeConnection {
     if *ZED_STATELESS {
         return open_fallback_db::<M>().await;
@@ -71,6 +74,18 @@ pub async fn open_db<M: Migrator + 'static>(db_dir: &Path, scope: &str) -> Threa
     open_fallback_db::<M>().await
 }
 
+#[cfg(target_family = "wasm")]
+pub async fn open_db<M: Migrator + 'static>(
+    _db_dir: &Path,
+    _scope: &str,
+) -> ThreadSafeConnection {
+    ThreadSafeConnection::builder::<M>("wasm-noop", false)
+        .build()
+        .await
+        .expect("WASM stub db build failed")
+}
+
+#[cfg(not(target_family = "wasm"))]
 async fn open_main_db<M: Migrator>(db_path: &Path) -> Option<ThreadSafeConnection> {
     log::trace!("Opening database {}", db_path.display());
     ThreadSafeConnection::builder::<M>(db_path.to_string_lossy().as_ref(), true)
@@ -81,6 +96,7 @@ async fn open_main_db<M: Migrator>(db_path: &Path) -> Option<ThreadSafeConnectio
         .log_err()
 }
 
+#[cfg(not(target_family = "wasm"))]
 async fn open_fallback_db<M: Migrator>() -> ThreadSafeConnection {
     log::warn!("Opening fallback in-memory database");
     ThreadSafeConnection::builder::<M>(FALLBACK_DB_NAME, false)
@@ -137,7 +153,7 @@ macro_rules! static_connection {
             $t($crate::smol::block_on($crate::open_test_db::<($($d,)* $t)>(stringify!($id))))
         });
 
-        #[cfg(not(any(test, feature = "test-support")))]
+        #[cfg(all(not(any(test, feature = "test-support")), not(target_family = "wasm")))]
         pub static $id: std::sync::LazyLock<$t> = std::sync::LazyLock::new(|| {
             let db_dir = $crate::database_dir();
             let scope = if false $(|| stringify!($global) == "global")? {
@@ -147,6 +163,15 @@ macro_rules! static_connection {
             };
             #[allow(unused_parens)]
             $t($crate::smol::block_on($crate::open_db::<($($d,)* $t)>(db_dir, scope)))
+        });
+
+        #[cfg(all(not(any(test, feature = "test-support")), target_family = "wasm"))]
+        pub static $id: std::sync::LazyLock<$t> = std::sync::LazyLock::new(|| {
+            #[allow(unused_parens)]
+            $t($crate::futures::executor::block_on($crate::open_db::<($($d,)* $t)>(
+                ::std::path::Path::new("/"),
+                "wasm",
+            )))
         });
     }
 }

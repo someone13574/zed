@@ -1321,6 +1321,10 @@ impl WorkspaceDb {
     /// Saves a workspace using the worktree roots. Will garbage collect any workspaces
     /// that used this workspace previously
     pub(crate) async fn save_workspace(&self, workspace: SerializedWorkspace) {
+        // No real SQLite on WASM — persistence is a no-op.
+        if cfg!(target_family = "wasm") {
+            return;
+        }
         let paths = workspace.paths.serialize();
         log::debug!("Saving workspace at location: {:?}", workspace.location);
         self.write(move |conn| {

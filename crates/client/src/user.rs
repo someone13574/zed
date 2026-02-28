@@ -212,6 +212,11 @@ impl UserStore {
                 let mut status = client.status();
                 let weak = Arc::downgrade(&client);
                 drop(client);
+                // Skip the initial value from the watch channel. The initial status is
+                // always SignedOut and all collections start empty, so there is nothing
+                // to clear. Skipping it avoids attempting to borrow the AppCell during
+                // app initialization before the first genuine status transition.
+                let _ = status.next().await;
                 while let Some(status) = status.next().await {
                     // if the client is dropped, the app is shutting down.
                     let Some(client) = weak.upgrade() else {

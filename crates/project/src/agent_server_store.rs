@@ -1141,15 +1141,21 @@ impl ExternalAgentServer for LocalExtensionArchiveAgent {
                     anyhow::bail!("unsupported archive type in URL: {}", archive_url);
                 };
 
-                // Download and extract
-                ::http_client::github_download::download_server_binary(
-                    &*http_client,
-                    archive_url,
-                    sha256.as_deref(),
-                    &version_dir,
-                    asset_kind,
-                )
-                .await?;
+                #[cfg(not(target_family = "wasm"))]
+                {
+                    ::http_client::github_download::download_server_binary(
+                        &*http_client,
+                        archive_url,
+                        sha256.as_deref(),
+                        &version_dir,
+                        asset_kind,
+                    )
+                    .await?;
+                }
+                #[cfg(target_family = "wasm")]
+                {
+                    anyhow::bail!("agent server archive downloads are unavailable on wasm");
+                }
             }
 
             // Validate and resolve cmd path
@@ -1330,14 +1336,21 @@ impl ExternalAgentServer for LocalRegistryArchiveAgent {
                     anyhow::bail!("unsupported archive type in URL: {}", archive_url);
                 };
 
-                ::http_client::github_download::download_server_binary(
-                    &*http_client,
-                    archive_url,
-                    sha256.as_deref(),
-                    &version_dir,
-                    asset_kind,
-                )
-                .await?;
+                #[cfg(not(target_family = "wasm"))]
+                {
+                    ::http_client::github_download::download_server_binary(
+                        &*http_client,
+                        archive_url,
+                        sha256.as_deref(),
+                        &version_dir,
+                        asset_kind,
+                    )
+                    .await?;
+                }
+                #[cfg(target_family = "wasm")]
+                {
+                    anyhow::bail!("agent server archive downloads are unavailable on wasm");
+                }
             }
 
             let cmd = &target_config.cmd;

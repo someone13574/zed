@@ -3,8 +3,9 @@ use language::{self, Buffer, TransactionId};
 use std::{
     collections::HashMap,
     ops::{AddAssign, Range, Sub},
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 use sum_tree::Bias;
 use text::BufferId;
 

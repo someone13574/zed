@@ -12,8 +12,10 @@ mod util;
 pub use listener::*;
 #[cfg(target_os = "windows")]
 pub use socket::*;
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), not(target_family = "wasm")))]
 pub use std::os::unix::net::{UnixListener, UnixStream};
+#[cfg(all(not(target_os = "windows"), target_family = "wasm"))]
+pub use smol::net::unix::{UnixListener, UnixStream};
 #[cfg(target_os = "windows")]
 pub use stream::*;
 

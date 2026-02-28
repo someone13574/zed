@@ -19,10 +19,9 @@ use language::language_settings::{AllLanguageSettings, SoftWrap};
 use language::{Bias, Point};
 pub use scroll_amount::ScrollAmount;
 use settings::Settings;
-use std::{
-    cmp::Ordering,
-    time::{Duration, Instant},
-};
+use std::cmp::Ordering;
+use std::time::Duration;
+use web_time::Instant;
 use ui::scrollbars::ScrollbarAutoHide;
 use util::ResultExt;
 use workspace::{ItemId, WorkspaceId};

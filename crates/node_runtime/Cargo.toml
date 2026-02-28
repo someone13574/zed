@@ -17,6 +17,9 @@ test-support = []
 
 [dependencies]
 anyhow.workspace = true
+semver.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
 async-compression.workspace = true
 async-tar.workspace = true
 async-trait.workspace = true
@@ -24,7 +27,6 @@ futures.workspace = true
 http_client.workspace = true
 log.workspace = true
 paths.workspace = true
-semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 smol.workspace = true

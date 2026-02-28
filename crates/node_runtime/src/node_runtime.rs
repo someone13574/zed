@@ -1,15 +1,28 @@
+#[cfg(not(target_family = "wasm"))]
 use anyhow::{Context as _, Result, anyhow, bail};
+#[cfg(not(target_family = "wasm"))]
 use async_compression::futures::bufread::GzipDecoder;
+#[cfg(not(target_family = "wasm"))]
 use async_tar::Archive;
+#[cfg(not(target_family = "wasm"))]
 use futures::{AsyncReadExt, FutureExt as _, channel::oneshot, future::Shared};
+#[cfg(not(target_family = "wasm"))]
 use http_client::{Host, HttpClient, Url};
+#[cfg(not(target_family = "wasm"))]
 use log::Level;
+#[cfg(not(target_family = "wasm"))]
 use semver::Version;
+#[cfg(not(target_family = "wasm"))]
 use serde::Deserialize;
+#[cfg(not(target_family = "wasm"))]
 use smol::io::BufReader;
+#[cfg(not(target_family = "wasm"))]
 use smol::{fs, lock::Mutex};
+#[cfg(not(target_family = "wasm"))]
 use std::collections::HashMap;
+#[cfg(not(target_family = "wasm"))]
 use std::fmt::Display;
+#[cfg(not(target_family = "wasm"))]
 use std::{
     env::{self, consts},
     ffi::OsString,
@@ -19,9 +32,23 @@ use std::{
     process::Output,
     sync::Arc,
 };
+#[cfg(not(target_family = "wasm"))]
 use util::ResultExt;
+#[cfg(not(target_family = "wasm"))]
 use util::archive::extract_zip;
 
+#[cfg(target_family = "wasm")]
+use anyhow::{Result, bail};
+#[cfg(target_family = "wasm")]
+use semver::Version;
+#[cfg(target_family = "wasm")]
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    process::Output,
+};
+
+#[cfg(not(target_family = "wasm"))]
 const NODE_CA_CERTS_ENV_VAR: &str = "NODE_EXTRA_CA_CERTS";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -47,9 +74,11 @@ pub enum VersionStrategy<'a> {
     Latest(&'a Version),
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[derive(Clone)]
 pub struct NodeRuntime(Arc<Mutex<NodeRuntimeState>>);
 
+#[cfg(not(target_family = "wasm"))]
 struct NodeRuntimeState {
     http: Arc<dyn HttpClient>,
     instance: Option<Box<dyn NodeRuntimeTrait>>,
@@ -58,6 +87,7 @@ struct NodeRuntimeState {
     shell_env_loaded: Shared<oneshot::Receiver<()>>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl NodeRuntime {
     pub fn new(
         http: Arc<dyn HttpClient>,
@@ -339,11 +369,13 @@ impl NodeRuntime {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 enum ArchiveType {
     TarGz,
     Zip,
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct NpmInfo {
@@ -352,11 +384,13 @@ pub struct NpmInfo {
     versions: Vec<Version>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[derive(Debug, Deserialize, Default)]
 pub struct NpmInfoDistTags {
     latest: Option<Version>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[async_trait::async_trait]
 trait NodeRuntimeTrait: Send + Sync {
     fn boxed_clone(&self) -> Box<dyn NodeRuntimeTrait>;
@@ -384,11 +418,13 @@ trait NodeRuntimeTrait: Send + Sync {
     ) -> Result<Option<Version>>;
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[derive(Clone)]
 struct ManagedNodeRuntime {
     installation_path: PathBuf,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl ManagedNodeRuntime {
     const VERSION: &str = "v24.11.0";
 
@@ -515,6 +551,7 @@ impl ManagedNodeRuntime {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn path_with_node_binary_prepended(node_binary: &Path) -> Option<OsString> {
     let existing_path = env::var_os("PATH");
     let node_bin_dir = node_binary.parent().map(|dir| dir.as_os_str());
@@ -536,6 +573,8 @@ fn path_with_node_binary_prepended(node_binary: &Path) -> Option<OsString> {
     }
 }
 
+#[async_trait::async_trait]
+#[cfg(not(target_family = "wasm"))]
 #[async_trait::async_trait]
 impl NodeRuntimeTrait for ManagedNodeRuntime {
     fn boxed_clone(&self) -> Box<dyn NodeRuntimeTrait> {
@@ -629,6 +668,7 @@ impl NodeRuntimeTrait for ManagedNodeRuntime {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[derive(Debug, Clone)]
 pub struct SystemNodeRuntime {
     node: PathBuf,
@@ -637,6 +677,7 @@ pub struct SystemNodeRuntime {
     scratch_dir: PathBuf,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl SystemNodeRuntime {
     const MIN_VERSION: semver::Version = Version::new(22, 0, 0);
     async fn new(node: PathBuf, npm: PathBuf) -> Result<Self> {
@@ -687,11 +728,13 @@ impl SystemNodeRuntime {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 enum DetectError {
     NotInPath(which::Error),
     Other(anyhow::Error),
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Display for DetectError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -705,6 +748,8 @@ impl Display for DetectError {
     }
 }
 
+#[async_trait::async_trait]
+#[cfg(not(target_family = "wasm"))]
 #[async_trait::async_trait]
 impl NodeRuntimeTrait for SystemNodeRuntime {
     fn boxed_clone(&self) -> Box<dyn NodeRuntimeTrait> {
@@ -771,6 +816,7 @@ impl NodeRuntimeTrait for SystemNodeRuntime {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub async fn read_package_installed_version(
     node_module_directory: PathBuf,
     name: &str,
@@ -799,11 +845,13 @@ pub async fn read_package_installed_version(
     Ok(Some(package_json.version))
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[derive(Clone)]
 pub struct UnavailableNodeRuntime {
     error_message: Arc<String>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[async_trait::async_trait]
 impl NodeRuntimeTrait for UnavailableNodeRuntime {
     fn boxed_clone(&self) -> Box<dyn NodeRuntimeTrait> {
@@ -841,6 +889,7 @@ impl NodeRuntimeTrait for UnavailableNodeRuntime {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn configure_npm_command(command: &mut util::command::Command, directory: Option<&Path>) {
     if let Some(directory) = directory {
         command.current_dir(directory);
@@ -848,6 +897,7 @@ fn configure_npm_command(command: &mut util::command::Command, directory: Option
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn proxy_argument(proxy: Option<&Url>) -> Option<String> {
     let mut proxy = proxy.cloned()?;
     // Map proxy settings from `http://localhost:10809` to `http://127.0.0.1:10809`
@@ -863,6 +913,7 @@ fn proxy_argument(proxy: Option<&Url>) -> Option<String> {
     Some(proxy.as_str().to_string())
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn build_npm_command_args(
     entrypoint: Option<&Path>,
     cache_dir: &Path,
@@ -894,6 +945,7 @@ fn build_npm_command_args(
     command_args
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn npm_command_env(node_binary: Option<&Path>) -> HashMap<String, String> {
     let mut command_env = HashMap::new();
     if let Some(node_binary) = node_binary {
@@ -926,6 +978,73 @@ fn npm_command_env(node_binary: Option<&Path>) -> HashMap<String, String> {
     command_env
 }
 
+#[cfg(target_family = "wasm")]
+#[derive(Clone)]
+pub struct NodeRuntime;
+
+#[cfg(target_family = "wasm")]
+impl NodeRuntime {
+    pub fn unavailable() -> Self {
+        NodeRuntime
+    }
+
+    pub async fn binary_path(&self) -> Result<PathBuf> {
+        bail!("Node.js is not available in WASM")
+    }
+
+    pub async fn run_npm_subcommand(
+        &self,
+        _directory: Option<&Path>,
+        _subcommand: &str,
+        _args: &[&str],
+    ) -> Result<Output> {
+        bail!("Node.js is not available in WASM")
+    }
+
+    pub async fn npm_package_installed_version(
+        &self,
+        _local_package_directory: &Path,
+        _name: &str,
+    ) -> Result<Option<Version>> {
+        bail!("Node.js is not available in WASM")
+    }
+
+    pub async fn npm_command(&self, _subcommand: &str, _args: &[&str]) -> Result<NpmCommand> {
+        bail!("Node.js is not available in WASM")
+    }
+
+    pub async fn npm_package_latest_version(&self, _name: &str) -> Result<Version> {
+        bail!("Node.js is not available in WASM")
+    }
+
+    pub async fn npm_install_packages(
+        &self,
+        _directory: &Path,
+        _packages: &[(&str, &str)],
+    ) -> Result<()> {
+        bail!("Node.js is not available in WASM")
+    }
+
+    pub async fn should_install_npm_package(
+        &self,
+        _package_name: &str,
+        _local_executable_path: &Path,
+        _local_package_directory: &Path,
+        _version_strategy: VersionStrategy<'_>,
+    ) -> bool {
+        false
+    }
+}
+
+#[cfg(target_family = "wasm")]
+pub async fn read_package_installed_version(
+    _node_module_directory: std::path::PathBuf,
+    _name: &str,
+) -> Result<Option<Version>> {
+    bail!("Node.js is not available in WASM")
+}
+
+#[cfg(not(target_family = "wasm"))]
 #[cfg(test)]
 mod tests {
     use http_client::Url;

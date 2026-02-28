@@ -1,3 +1,4 @@
+#[cfg(not(target_family = "wasm"))]
 pub mod fs_watcher;
 
 use parking_lot::Mutex;
@@ -15,6 +16,7 @@ use gpui::Global;
 use gpui::ReadGlobal as _;
 use gpui::SharedString;
 use std::borrow::Cow;
+#[cfg(not(target_family = "wasm"))]
 use util::command::new_command;
 
 #[cfg(unix)]
@@ -26,14 +28,16 @@ use std::os::unix::fs::{FileTypeExt, MetadataExt};
 #[cfg(any(target_os = "macos", target_os = "freebsd"))]
 use std::mem::MaybeUninit;
 
+#[cfg(not(target_family = "wasm"))]
 use async_tar::Archive;
-use futures::{AsyncRead, Stream, StreamExt, future::BoxFuture};
-use git::repository::{GitRepository, RealGitRepository};
+use futures::{AsyncRead, AsyncReadExt, AsyncWriteExt, Stream, StreamExt, future::BoxFuture};
+use git::repository::GitRepository;
+#[cfg(not(target_family = "wasm"))]
+use git::repository::RealGitRepository;
+#[cfg(not(target_family = "wasm"))]
 use is_executable::IsExecutable;
 use rope::Rope;
 use serde::{Deserialize, Serialize};
-use smol::io::AsyncWriteExt;
-#[cfg(any(target_os = "windows", feature = "test-support"))]
 use std::path::Component;
 use std::{
     io::{self, Write},
@@ -45,21 +49,24 @@ use std::{
 use tempfile::TempDir;
 use text::LineEnding;
 
-#[cfg(feature = "test-support")]
+#[cfg(target_family = "wasm")]
+pub struct Archive<T>(std::marker::PhantomData<T>);
+
+#[cfg(any(feature = "test-support", feature = "wasm"))]
 mod fake_git_repo;
-#[cfg(feature = "test-support")]
+#[cfg(any(feature = "test-support", feature = "wasm"))]
+use async_channel::Sender as AsyncChannelSender;
+#[cfg(any(feature = "test-support", feature = "wasm"))]
 use collections::{BTreeMap, btree_map};
-#[cfg(feature = "test-support")]
+#[cfg(any(feature = "test-support", feature = "wasm"))]
 use fake_git_repo::FakeGitRepositoryState;
-#[cfg(feature = "test-support")]
+#[cfg(any(feature = "test-support", feature = "wasm"))]
 use git::{
     repository::{InitialGraphCommitData, RepoPath, repo_path},
     status::{FileStatus, StatusCode, TrackedStatus, UnmergedStatus},
 };
 
-#[cfg(feature = "test-support")]
-use smol::io::AsyncReadExt;
-#[cfg(feature = "test-support")]
+#[cfg(any(feature = "test-support", feature = "wasm"))]
 use std::ffi::OsStr;
 
 pub trait Watcher: Send + Sync {
@@ -151,7 +158,7 @@ pub trait Fs: Send + Sync {
     async fn is_case_sensitive(&self) -> bool;
     fn subscribe_to_jobs(&self) -> JobEventReceiver;
 
-    #[cfg(feature = "test-support")]
+    #[cfg(any(feature = "test-support", feature = "wasm"))]
     fn as_fake(&self) -> Arc<FakeFs> {
         panic!("called as_fake on a real fs");
     }
@@ -308,6 +315,7 @@ impl From<MTime> for proto::Timestamp {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub struct RealFs {
     bundled_git_binary_path: Option<PathBuf>,
     executor: BackgroundExecutor,
@@ -320,6 +328,7 @@ pub trait FileHandle: Send + Sync + std::fmt::Debug {
     fn current_path(&self, fs: &Arc<dyn Fs>) -> Result<PathBuf>;
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl FileHandle for std::fs::File {
     #[cfg(target_os = "macos")]
     fn current_path(&self, _: &Arc<dyn Fs>) -> Result<PathBuf> {
@@ -412,8 +421,10 @@ impl FileHandle for std::fs::File {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub struct RealWatcher {}
 
+#[cfg(not(target_family = "wasm"))]
 impl RealFs {
     pub fn new(git_binary_path: Option<PathBuf>, executor: BackgroundExecutor) -> Self {
         Self {
@@ -506,6 +517,7 @@ impl RealFs {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[async_trait::async_trait]
 impl Fs for RealFs {
     async fn create_dir(&self, path: &Path) -> Result<()> {
@@ -1184,6 +1196,7 @@ impl Fs for RealFs {
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+#[cfg(not(target_family = "wasm"))]
 impl Watcher for RealWatcher {
     fn add(&self, _: &Path) -> Result<()> {
         Ok(())
@@ -1194,7 +1207,7 @@ impl Watcher for RealWatcher {
     }
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(any(feature = "test-support", feature = "wasm"))]
 pub struct FakeFs {
     this: std::sync::Weak<Self>,
     // Use an unfair lock to ensure tests are deterministic.
@@ -1202,13 +1215,13 @@ pub struct FakeFs {
     executor: gpui::BackgroundExecutor,
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(any(feature = "test-support", feature = "wasm"))]
 struct FakeFsState {
     root: FakeFsEntry,
     next_inode: u64,
     next_mtime: SystemTime,
-    git_event_tx: smol::channel::Sender<PathBuf>,
-    event_txs: Vec<(PathBuf, smol::channel::Sender<Vec<PathEvent>>)>,
+    git_event_tx: AsyncChannelSender<PathBuf>,
+    event_txs: Vec<(PathBuf, AsyncChannelSender<Vec<PathEvent>>)>,
     events_paused: bool,
     buffered_events: Vec<PathEvent>,
     metadata_call_count: usize,
@@ -1218,7 +1231,7 @@ struct FakeFsState {
     job_event_subscribers: Arc<Mutex<Vec<JobEventSender>>>,
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(any(feature = "test-support", feature = "wasm"))]
 #[derive(Clone, Debug)]
 enum FakeFsEntry {
     File {
@@ -1241,7 +1254,7 @@ enum FakeFsEntry {
     },
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(any(feature = "test-support", feature = "wasm"))]
 impl PartialEq for FakeFsEntry {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -1302,7 +1315,7 @@ impl PartialEq for FakeFsEntry {
     }
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(any(feature = "test-support", feature = "wasm"))]
 impl FakeFsState {
     fn get_and_increment_mtime(&mut self) -> MTime {
         let mtime = self.next_mtime;
@@ -1466,18 +1479,18 @@ impl FakeFsState {
     }
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(any(feature = "test-support", feature = "wasm"))]
 pub static FS_DOT_GIT: std::sync::LazyLock<&'static OsStr> =
     std::sync::LazyLock::new(|| OsStr::new(".git"));
 
-#[cfg(feature = "test-support")]
+#[cfg(any(feature = "test-support", feature = "wasm"))]
 impl FakeFs {
     /// We need to use something large enough for Windows and Unix to consider this a new file.
     /// https://doc.rust-lang.org/nightly/std/time/struct.SystemTime.html#platform-specific-behavior
     const SYSTEMTIME_INTERVAL: Duration = Duration::from_nanos(100);
 
     pub fn new(executor: gpui::BackgroundExecutor) -> Arc<Self> {
-        let (tx, rx) = smol::channel::bounded::<PathBuf>(10);
+        let (tx, rx) = async_channel::bounded::<PathBuf>(10);
 
         let this = Arc::new_cyclic(|this| Self {
             this: this.clone(),
@@ -2082,7 +2095,7 @@ impl FakeFs {
         let mut result = Vec::new();
         let mut queue = collections::VecDeque::new();
         let state = &*self.state.lock();
-        queue.push_back((PathBuf::from(util::path!("/")), &state.root));
+        queue.push_back((PathBuf::from("/"), &state.root));
         while let Some((path, entry)) = queue.pop_front() {
             if let FakeFsEntry::Dir { entries, .. } = entry {
                 for (name, entry) in entries {
@@ -2104,7 +2117,7 @@ impl FakeFs {
         let mut result = Vec::new();
         let mut queue = collections::VecDeque::new();
         let state = &*self.state.lock();
-        queue.push_back((PathBuf::from(util::path!("/")), &state.root));
+        queue.push_back((PathBuf::from("/"), &state.root));
         while let Some((path, entry)) = queue.pop_front() {
             if let FakeFsEntry::Dir { entries, .. } = entry {
                 for (name, entry) in entries {
@@ -2126,7 +2139,7 @@ impl FakeFs {
         let mut result = Vec::new();
         let mut queue = collections::VecDeque::new();
         let state = &*self.state.lock();
-        queue.push_back((PathBuf::from(util::path!("/")), &state.root));
+        queue.push_back((PathBuf::from("/"), &state.root));
         while let Some((path, entry)) = queue.pop_front() {
             match entry {
                 FakeFsEntry::File { .. } => result.push(path),
@@ -2145,7 +2158,7 @@ impl FakeFs {
         let mut result = Vec::new();
         let mut queue = collections::VecDeque::new();
         let state = &*self.state.lock();
-        queue.push_back((PathBuf::from(util::path!("/")), &state.root));
+        queue.push_back((PathBuf::from("/"), &state.root));
         while let Some((path, entry)) = queue.pop_front() {
             match entry {
                 FakeFsEntry::File { content, .. } => {
@@ -2199,11 +2212,15 @@ impl FakeFs {
     }
 
     fn simulate_random_delay(&self) -> impl futures::Future<Output = ()> {
-        self.executor.simulate_random_delay()
+        let executor = self.executor.clone();
+        async move {
+            #[cfg(any(feature = "test-support", not(target_family = "wasm")))]
+            executor.simulate_random_delay().await;
+        }
     }
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(any(feature = "test-support", feature = "wasm"))]
 impl FakeFsEntry {
     fn is_file(&self) -> bool {
         matches!(self, Self::File { .. })
@@ -2230,15 +2247,15 @@ impl FakeFsEntry {
     }
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(any(feature = "test-support", feature = "wasm"))]
 struct FakeWatcher {
-    tx: smol::channel::Sender<Vec<PathEvent>>,
+    tx: AsyncChannelSender<Vec<PathEvent>>,
     original_path: PathBuf,
     fs_state: Arc<Mutex<FakeFsState>>,
     prefixes: Mutex<Vec<PathBuf>>,
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(any(feature = "test-support", feature = "wasm"))]
 impl Watcher for FakeWatcher {
     fn add(&self, path: &Path) -> Result<()> {
         if path.starts_with(&self.original_path) {
@@ -2258,13 +2275,13 @@ impl Watcher for FakeWatcher {
     }
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(any(feature = "test-support", feature = "wasm"))]
 #[derive(Debug)]
 struct FakeHandle {
     inode: u64,
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(any(feature = "test-support", feature = "wasm"))]
 impl FileHandle for FakeHandle {
     fn current_path(&self, fs: &Arc<dyn Fs>) -> Result<PathBuf> {
         let fs = fs.as_fake();
@@ -2280,7 +2297,7 @@ impl FileHandle for FakeHandle {
     }
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(any(feature = "test-support", feature = "wasm"))]
 #[async_trait::async_trait]
 impl Fs for FakeFs {
     async fn create_dir(&self, path: &Path) -> Result<()> {
@@ -2386,6 +2403,14 @@ impl Fs for FakeFs {
         path: &Path,
         content: Archive<Pin<&mut (dyn AsyncRead + Send)>>,
     ) -> Result<()> {
+        #[cfg(target_family = "wasm")]
+        {
+            let _ = (path, content);
+            anyhow::bail!("extracting tar files is unavailable in WASM fake fs")
+        }
+
+        #[cfg(not(target_family = "wasm"))]
+        {
         let mut entries = content.entries()?;
         while let Some(entry) = entries.next().await {
             let mut entry = entry?;
@@ -2398,6 +2423,7 @@ impl Fs for FakeFs {
             }
         }
         Ok(())
+        }
     }
 
     async fn rename(&self, old_path: &Path, new_path: &Path, options: RenameOptions) -> Result<()> {
@@ -2726,7 +2752,7 @@ impl Fs for FakeFs {
         Arc<dyn Watcher>,
     ) {
         self.simulate_random_delay().await;
-        let (tx, rx) = smol::channel::unbounded();
+        let (tx, rx) = async_channel::unbounded();
         let path = path.to_path_buf();
         self.state.lock().event_txs.push((path.clone(), tx.clone()));
         let executor = self.executor.clone();
@@ -2749,6 +2775,7 @@ impl Fs for FakeFs {
                     });
                     let executor = executor.clone();
                     async move {
+                        #[cfg(any(feature = "test-support", not(target_family = "wasm")))]
                         executor.simulate_random_delay().await;
                         result
                     }
@@ -2808,7 +2835,7 @@ impl Fs for FakeFs {
         receiver
     }
 
-    #[cfg(feature = "test-support")]
+    #[cfg(any(feature = "test-support", feature = "wasm"))]
     fn as_fake(&self) -> Arc<FakeFs> {
         self.this.upgrade().unwrap()
     }

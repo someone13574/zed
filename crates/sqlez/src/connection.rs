@@ -1,3 +1,4 @@
+#[cfg(not(target_family = "wasm"))]
 use std::{
     cell::RefCell,
     ffi::{CStr, CString},
@@ -6,17 +7,44 @@ use std::{
     ptr,
 };
 
+#[cfg(not(target_family = "wasm"))]
 use anyhow::Result;
+#[cfg(not(target_family = "wasm"))]
 use libsqlite3_sys::*;
 
+#[cfg(not(target_family = "wasm"))]
 pub struct Connection {
     pub(crate) sqlite3: *mut sqlite3,
     persistent: bool,
     pub(crate) write: RefCell<bool>,
     _sqlite: PhantomData<sqlite3>,
 }
+#[cfg(not(target_family = "wasm"))]
 unsafe impl Send for Connection {}
 
+#[cfg(target_family = "wasm")]
+pub struct Connection;
+
+#[cfg(target_family = "wasm")]
+impl Connection {
+    pub fn persistent(&self) -> bool {
+        false
+    }
+
+    pub fn can_write(&self) -> bool {
+        false
+    }
+
+    pub(crate) fn with_write<T>(&self, callback: impl FnOnce(&Connection) -> T) -> T {
+        callback(self)
+    }
+
+    pub(crate) fn last_error(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
 impl Connection {
     pub(crate) fn open(uri: &str, persistent: bool) -> Result<Self> {
         let mut connection = Self {
@@ -217,6 +245,7 @@ impl Connection {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn parse_alter_table(remaining_sql_str: &str) -> Option<(String, String)> {
     let remaining_sql_str = remaining_sql_str.to_lowercase();
     if remaining_sql_str.starts_with("alter")
@@ -255,6 +284,7 @@ fn parse_alter_table(remaining_sql_str: &str) -> Option<(String, String)> {
     None
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Drop for Connection {
     fn drop(&mut self) {
         unsafe { sqlite3_close(self.sqlite3) };

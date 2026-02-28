@@ -18,6 +18,9 @@ pub fn headless() -> gpui::Application {
     gpui::Application::with_platform(current_platform(true))
 }
 
+#[cfg(target_family = "wasm")]
+pub use gpui_web::pick_browser_files;
+
 /// Initializes panic hooks and logging for the web platform.
 /// Call this before running the application in a wasm_bindgen entrypoint.
 #[cfg(target_family = "wasm")]

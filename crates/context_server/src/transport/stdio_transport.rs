@@ -8,9 +8,11 @@ use futures::{
     AsyncBufReadExt as _, AsyncRead, AsyncWrite, AsyncWriteExt as _, Stream, StreamExt as _,
 };
 use gpui::AsyncApp;
-use settings::Settings as _;
 use smol::channel;
 use smol::process::Child;
+#[cfg(not(target_family = "wasm"))]
+use settings::Settings as _;
+#[cfg(not(target_family = "wasm"))]
 use terminal::terminal_settings::TerminalSettings;
 use util::TryFutureExt as _;
 use util::shell_builder::ShellBuilder;
@@ -31,6 +33,14 @@ impl StdioTransport {
         working_directory: &Option<PathBuf>,
         cx: &AsyncApp,
     ) -> Result<Self> {
+        #[cfg(target_family = "wasm")]
+        {
+            let _ = (binary, working_directory, cx);
+            anyhow::bail!("context server stdio transport is unavailable on wasm");
+        }
+
+        #[cfg(not(target_family = "wasm"))]
+        {
         let shell = cx.update(|cx| TerminalSettings::get(None, cx).shell.clone());
         let builder = ShellBuilder::new(&shell, cfg!(windows)).non_interactive();
         let mut command =
@@ -74,6 +84,7 @@ impl StdioTransport {
             stderr_receiver,
             server,
         })
+        }
     }
 
     async fn handle_input<Stdout>(stdin: Stdout, inbound_rx: channel::Sender<String>)

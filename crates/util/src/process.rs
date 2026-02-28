@@ -74,7 +74,7 @@ impl Child {
         self.process
     }
 
-    #[cfg(not(windows))]
+    #[cfg(all(not(windows), not(target_family = "wasm")))]
     pub fn kill(&mut self) -> Result<()> {
         let pid = self.process.id();
         unsafe {
@@ -83,7 +83,7 @@ impl Child {
         Ok(())
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_family = "wasm"))]
     pub fn kill(&mut self) -> Result<()> {
         // TODO(windows): terminate the job object in kill
         self.process.kill()?;

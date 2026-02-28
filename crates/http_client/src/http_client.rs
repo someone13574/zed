@@ -1,5 +1,4 @@
 mod async_body;
-#[cfg(not(target_family = "wasm"))]
 pub mod github;
 #[cfg(not(target_family = "wasm"))]
 pub mod github_download;

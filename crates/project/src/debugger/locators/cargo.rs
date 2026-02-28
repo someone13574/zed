@@ -1,15 +1,23 @@
-use anyhow::{Context as _, Result};
+#[cfg(not(target_family = "wasm"))]
+use anyhow::Context as _;
+use anyhow::Result;
 use async_trait::async_trait;
 use dap::{DapLocator, DebugRequest, adapters::DebugAdapterName};
 use gpui::{BackgroundExecutor, SharedString};
 use serde_json::{Value, json};
+#[cfg(not(target_family = "wasm"))]
 use smol::{io::AsyncReadExt, process::Stdio as SmolStdio};
+#[cfg(not(target_family = "wasm"))]
 use std::time::Duration;
-use task::{BuildTaskDefinition, DebugScenario, ShellBuilder, SpawnInTerminal, TaskTemplate};
+use task::{BuildTaskDefinition, DebugScenario, SpawnInTerminal, TaskTemplate};
+#[cfg(not(target_family = "wasm"))]
+use task::ShellBuilder;
+#[cfg(not(target_family = "wasm"))]
 use util::command::{Stdio, new_command};
 
 pub(crate) struct CargoLocator;
 
+#[cfg(not(target_family = "wasm"))]
 async fn find_best_executable(
     executables: &[String],
     test_name: &str,
@@ -52,6 +60,15 @@ async fn find_best_executable(
         }
         let _ = child.kill();
     }
+    None
+}
+
+#[cfg(target_family = "wasm")]
+async fn find_best_executable(
+    _executables: &[String],
+    _test_name: &str,
+    _executor: BackgroundExecutor,
+) -> Option<String> {
     None
 }
 #[async_trait]
@@ -118,110 +135,119 @@ impl DapLocator for CargoLocator {
         build_config: SpawnInTerminal,
         executor: BackgroundExecutor,
     ) -> Result<DebugRequest> {
-        let cwd = build_config
-            .cwd
-            .clone()
-            .context("Couldn't get cwd from debug config which is needed for locators")?;
-        let builder = ShellBuilder::new(&build_config.shell, cfg!(windows)).non_interactive();
-        let mut child = builder
-            .build_smol_command(
-                Some("cargo".into()),
-                &build_config
+        #[cfg(target_family = "wasm")]
+        {
+            let _ = (build_config, executor);
+            anyhow::bail!("cargo locator is unavailable on wasm");
+        }
+
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let cwd = build_config
+                .cwd
+                .clone()
+                .context("Couldn't get cwd from debug config which is needed for locators")?;
+            let builder = ShellBuilder::new(&build_config.shell, cfg!(windows)).non_interactive();
+            let mut child = builder
+                .build_smol_command(
+                    Some("cargo".into()),
+                    &build_config
+                        .args
+                        .iter()
+                        .cloned()
+                        .take_while(|arg| arg != "--")
+                        .chain(Some("--message-format=json".to_owned()))
+                        .collect::<Vec<_>>(),
+                )
+                .envs(build_config.env.iter().map(|(k, v)| (k.clone(), v.clone())))
+                .current_dir(cwd)
+                .stdout(SmolStdio::piped())
+                .spawn()?;
+
+            let mut output = String::new();
+            if let Some(mut stdout) = child.stdout.take() {
+                stdout.read_to_string(&mut output).await?;
+            }
+
+            let status = child.status().await?;
+            anyhow::ensure!(status.success(), "Cargo command failed");
+
+            let is_test = build_config
+                .args
+                .first()
+                .is_some_and(|arg| arg == "test" || arg == "t");
+
+            let is_ignored = build_config.args.contains(&"--include-ignored".to_owned());
+
+            let executables = output
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .filter_map(|line| serde_json::from_str(line).ok())
+                .filter(|json: &Value| {
+                    let is_test_binary = json
+                        .get("profile")
+                        .and_then(|profile| profile.get("test"))
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+
+                    if is_test {
+                        is_test_binary
+                    } else {
+                        !is_test_binary
+                    }
+                })
+                .filter_map(|json: Value| {
+                    json.get("executable")
+                        .and_then(Value::as_str)
+                        .map(String::from)
+                })
+                .collect::<Vec<_>>();
+            anyhow::ensure!(
+                !executables.is_empty(),
+                "Couldn't get executable in cargo locator"
+            );
+
+            let mut test_name = None;
+            if is_test {
+                test_name = build_config
                     .args
                     .iter()
-                    .cloned()
-                    .take_while(|arg| arg != "--")
-                    .chain(Some("--message-format=json".to_owned()))
-                    .collect::<Vec<_>>(),
-            )
-            .envs(build_config.env.iter().map(|(k, v)| (k.clone(), v.clone())))
-            .current_dir(cwd)
-            .stdout(SmolStdio::piped())
-            .spawn()?;
-
-        let mut output = String::new();
-        if let Some(mut stdout) = child.stdout.take() {
-            stdout.read_to_string(&mut output).await?;
-        }
-
-        let status = child.status().await?;
-        anyhow::ensure!(status.success(), "Cargo command failed");
-
-        let is_test = build_config
-            .args
-            .first()
-            .is_some_and(|arg| arg == "test" || arg == "t");
-
-        let is_ignored = build_config.args.contains(&"--include-ignored".to_owned());
-
-        let executables = output
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .filter_map(|line| serde_json::from_str(line).ok())
-            .filter(|json: &Value| {
-                let is_test_binary = json
-                    .get("profile")
-                    .and_then(|profile| profile.get("test"))
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-
-                if is_test {
-                    is_test_binary
+                    .rev()
+                    .take_while(|name| "--" != name.as_str())
+                    .find(|name| !name.starts_with("-"))
+                    .cloned();
+            }
+            let executable = {
+                if let Some(name) = test_name.as_ref().and_then(|name| {
+                    name.strip_prefix('$')
+                        .map(|name| build_config.env.get(name))
+                        .unwrap_or(Some(name))
+                }) {
+                    find_best_executable(&executables, name, executor).await
                 } else {
-                    !is_test_binary
+                    None
                 }
-            })
-            .filter_map(|json: Value| {
-                json.get("executable")
-                    .and_then(Value::as_str)
-                    .map(String::from)
-            })
-            .collect::<Vec<_>>();
-        anyhow::ensure!(
-            !executables.is_empty(),
-            "Couldn't get executable in cargo locator"
-        );
+            };
 
-        let mut test_name = None;
-        if is_test {
-            test_name = build_config
-                .args
-                .iter()
-                .rev()
-                .take_while(|name| "--" != name.as_str())
-                .find(|name| !name.starts_with("-"))
-                .cloned();
-        }
-        let executable = {
-            if let Some(name) = test_name.as_ref().and_then(|name| {
-                name.strip_prefix('$')
-                    .map(|name| build_config.env.get(name))
-                    .unwrap_or(Some(name))
-            }) {
-                find_best_executable(&executables, name, executor).await
-            } else {
-                None
+            let Some(executable) = executable.or_else(|| executables.first().cloned()) else {
+                anyhow::bail!("Couldn't get executable in cargo locator");
+            };
+
+            let mut args: Vec<_> = test_name.into_iter().collect();
+            if is_test {
+                args.push("--nocapture".to_owned());
+                if is_ignored {
+                    args.push("--include-ignored".to_owned());
+                    args.push("--exact".to_owned());
+                }
             }
-        };
 
-        let Some(executable) = executable.or_else(|| executables.first().cloned()) else {
-            anyhow::bail!("Couldn't get executable in cargo locator");
-        };
-
-        let mut args: Vec<_> = test_name.into_iter().collect();
-        if is_test {
-            args.push("--nocapture".to_owned());
-            if is_ignored {
-                args.push("--include-ignored".to_owned());
-                args.push("--exact".to_owned());
-            }
+            Ok(DebugRequest::Launch(task::LaunchRequest {
+                program: executable,
+                cwd: build_config.cwd,
+                args,
+                env: build_config.env.into_iter().collect(),
+            }))
         }
-
-        Ok(DebugRequest::Launch(task::LaunchRequest {
-            program: executable,
-            cwd: build_config.cwd,
-            args,
-            env: build_config.env.into_iter().collect(),
-        }))
     }
 }

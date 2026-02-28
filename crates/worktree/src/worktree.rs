@@ -61,8 +61,10 @@ use std::{
         Arc,
         atomic::{AtomicUsize, Ordering::SeqCst},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
+#[cfg(not(target_family = "wasm"))]
+use std::time::Instant;
 use sum_tree::{Bias, Dimensions, Edit, KeyedItem, SeekTarget, SumTree, Summary, TreeMap, TreeSet};
 use text::{LineEnding, Rope};
 use util::{
@@ -1792,11 +1794,13 @@ impl LocalWorktree {
         } else {
             vec![path.clone()]
         };
+        #[cfg(not(target_family = "wasm"))]
         let t0 = Instant::now();
         let mut refresh = self.refresh_entries_for_paths(paths);
         // todo(lw): Hot foreground spawn
         cx.spawn(async move |this, cx| {
             refresh.recv().await;
+            #[cfg(not(target_family = "wasm"))]
             log::trace!("refreshed entry {path:?} in {:?}", t0.elapsed());
             let new_entry = this.read_with(cx, |this, _| {
                 this.entry_for_path(&path).cloned().with_context(|| {
@@ -4778,12 +4782,13 @@ impl BackgroundScanner {
         {
             for (parent_abs_path, ignore_stack) in ignores_to_update {
                 ignore_queue_tx
-                    .send_blocking(UpdateIgnoreStatusJob {
+                    .send(UpdateIgnoreStatusJob {
                         abs_path: parent_abs_path,
                         ignore_stack,
                         ignore_queue: ignore_queue_tx.clone(),
                         scan_queue: scan_job_tx.clone(),
                     })
+                    .await
                     .unwrap();
             }
         }

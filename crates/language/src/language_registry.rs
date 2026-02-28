@@ -1080,20 +1080,36 @@ impl LanguageRegistry {
                     *grammar = AvailableGrammar::Loading(wasm_path.clone(), vec![tx]);
                     self.executor
                         .spawn(async move {
-                            let grammar_result = maybe!({
-                                let wasm_bytes = std::fs::read(&wasm_path)?;
-                                let grammar_name = wasm_path
-                                    .file_stem()
-                                    .and_then(OsStr::to_str)
-                                    .context("invalid grammar filename")?;
-                                anyhow::Ok(with_parser(|parser| {
-                                    let mut store = parser.take_wasm_store().unwrap();
-                                    let grammar = store.load_language(grammar_name, &wasm_bytes);
-                                    parser.set_wasm_store(store).unwrap();
-                                    grammar
-                                })?)
-                            })
-                            .map_err(Arc::new);
+                            let grammar_result: std::result::Result<
+                                tree_sitter::Language,
+                                Arc<anyhow::Error>,
+                            > = {
+                                #[cfg(not(target_family = "wasm"))]
+                                {
+                                    maybe!({
+                                        let wasm_bytes = std::fs::read(&wasm_path)?;
+                                        let grammar_name = wasm_path
+                                            .file_stem()
+                                            .and_then(OsStr::to_str)
+                                            .context("invalid grammar filename")?;
+                                        anyhow::Ok(with_parser(|parser| {
+                                            let mut store = parser.take_wasm_store().unwrap();
+                                            let grammar =
+                                                store.load_language(grammar_name, &wasm_bytes);
+                                            parser.set_wasm_store(store).unwrap();
+                                            grammar
+                                        })?)
+                                    })
+                                    .map_err(Arc::new)
+                                }
+
+                                #[cfg(target_family = "wasm")]
+                                {
+                                    Err(Arc::new(anyhow!(
+                                        "loading wasm tree-sitter grammars is not supported on wasm targets",
+                                    )))
+                                }
+                            };
 
                             let value = match &grammar_result {
                                 Ok(grammar) => AvailableGrammar::Loaded(wasm_path, grammar.clone()),
@@ -1202,10 +1218,14 @@ impl LanguageRegistry {
             return;
         };
 
+        #[cfg(not(target_family = "wasm"))]
         smol::fs::remove_dir_all(dir)
             .await
             .context("server container removal")
             .log_err();
+
+        #[cfg(target_family = "wasm")]
+        let _ = dir;
     }
 }
 

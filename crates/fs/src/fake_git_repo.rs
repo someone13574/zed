@@ -2,6 +2,7 @@ use crate::{FakeFs, FakeFsEntry, Fs, RemoveOptions, RenameOptions};
 use anyhow::{Context as _, Result, bail};
 use collections::{HashMap, HashSet};
 use futures::future::{self, BoxFuture, join_all};
+use futures::FutureExt as _;
 use git::{
     Oid, RunHook,
     blame::Blame,
@@ -19,10 +20,14 @@ use gpui::{AsyncApp, BackgroundExecutor, SharedString, Task};
 use ignore::gitignore::GitignoreBuilder;
 use parking_lot::Mutex;
 use rope::Rope;
-use smol::{channel::Sender, future::FutureExt as _};
+#[cfg(not(target_family = "wasm"))]
+use smol::channel::Sender;
 use std::{path::PathBuf, sync::Arc};
 use text::LineEnding;
 use util::{paths::PathStyle, rel_path::RelPath};
+
+#[cfg(target_family = "wasm")]
+use git::repository::Sender;
 
 #[derive(Clone)]
 pub struct FakeGitRepository {
@@ -36,7 +41,7 @@ pub struct FakeGitRepository {
 
 #[derive(Debug, Clone)]
 pub struct FakeGitRepositoryState {
-    pub event_emitter: smol::channel::Sender<PathBuf>,
+    pub event_emitter: Sender<PathBuf>,
     pub unmerged_paths: HashMap<RepoPath, UnmergedStatus>,
     pub head_contents: HashMap<RepoPath, String>,
     pub index_contents: HashMap<RepoPath, String>,
@@ -56,7 +61,7 @@ pub struct FakeGitRepositoryState {
 }
 
 impl FakeGitRepositoryState {
-    pub fn new(event_emitter: smol::channel::Sender<PathBuf>) -> Self {
+    pub fn new(event_emitter: Sender<PathBuf>) -> Self {
         FakeGitRepositoryState {
             event_emitter,
             head_contents: Default::default(),
@@ -87,6 +92,7 @@ impl FakeGitRepository {
         let executor = self.executor.clone();
         let dot_git_path = self.dot_git_path.clone();
         async move {
+            #[cfg(any(feature = "test-support", not(target_family = "wasm")))]
             executor.simulate_random_delay().await;
             fs.with_git_state(&dot_git_path, write, f)?
         }
@@ -420,6 +426,7 @@ impl GitRepository for FakeGitRepository {
         let dot_git_path = self.dot_git_path.clone();
         async move {
             let path = directory.join(&name);
+            #[cfg(any(feature = "test-support", not(target_family = "wasm")))]
             executor.simulate_random_delay().await;
             // Check for simulated error before any side effects
             fs.with_git_state(&dot_git_path, false, |state| {
@@ -459,6 +466,7 @@ impl GitRepository for FakeGitRepository {
         let executor = self.executor.clone();
         let dot_git_path = self.dot_git_path.clone();
         async move {
+            #[cfg(any(feature = "test-support", not(target_family = "wasm")))]
             executor.simulate_random_delay().await;
             // Validate the worktree exists in state before touching the filesystem
             fs.with_git_state(&dot_git_path, false, {
@@ -494,6 +502,7 @@ impl GitRepository for FakeGitRepository {
         let executor = self.executor.clone();
         let dot_git_path = self.dot_git_path.clone();
         async move {
+            #[cfg(any(feature = "test-support", not(target_family = "wasm")))]
             executor.simulate_random_delay().await;
             // Validate the worktree exists in state before touching the filesystem
             fs.with_git_state(&dot_git_path, false, {
@@ -904,8 +913,11 @@ impl GitRepository for FakeGitRepository {
         let checkpoints = self.checkpoints.clone();
         let repository_dir_path = self.repository_dir_path.parent().unwrap().to_path_buf();
         async move {
+            #[cfg(any(feature = "test-support", not(target_family = "wasm")))]
             executor.simulate_random_delay().await;
-            let oid = git::Oid::random(&mut *executor.rng().lock());
+            let oid: Oid = format!("{:040x}", checkpoints.lock().len() + 1)
+                .parse()
+                .expect("generated checkpoint oid should be valid");
             let entry = fs.entry(&repository_dir_path)?;
             checkpoints.lock().insert(oid, entry);
             Ok(GitRepositoryCheckpoint { commit_sha: oid })
@@ -919,6 +931,7 @@ impl GitRepository for FakeGitRepository {
         let checkpoints = self.checkpoints.clone();
         let repository_dir_path = self.repository_dir_path.parent().unwrap().to_path_buf();
         async move {
+            #[cfg(any(feature = "test-support", not(target_family = "wasm")))]
             executor.simulate_random_delay().await;
             let checkpoints = checkpoints.lock();
             let entry = checkpoints
@@ -938,6 +951,7 @@ impl GitRepository for FakeGitRepository {
         let executor = self.executor.clone();
         let checkpoints = self.checkpoints.clone();
         async move {
+            #[cfg(any(feature = "test-support", not(target_family = "wasm")))]
             executor.simulate_random_delay().await;
             let checkpoints = checkpoints.lock();
             let left = checkpoints

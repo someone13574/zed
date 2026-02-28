@@ -12,5 +12,5 @@ pub use dispatcher::WebDispatcher;
 pub use display::WebDisplay;
 pub use keyboard::WebKeyboardLayout;
 pub use logging::init_logging;
-pub use platform::WebPlatform;
+pub use platform::{WebPlatform, pick_browser_files};
 pub use window::WebWindow;

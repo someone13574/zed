@@ -10,7 +10,12 @@ pub mod rel_path;
 pub mod schemars;
 pub mod serde;
 pub mod shell;
+#[cfg(not(target_family = "wasm"))]
 pub mod shell_builder;
+#[cfg(target_family = "wasm")]
+#[path = "shell_builder_wasm.rs"]
+pub mod shell_builder;
+#[cfg(not(target_family = "wasm"))]
 pub mod shell_env;
 pub mod size;
 #[cfg(any(test, feature = "test-support"))]
@@ -284,6 +289,7 @@ fn load_shell_from_passwd() -> Result<()> {
 }
 
 /// Returns a shell escaped path for the current zed executable
+#[cfg(not(target_family = "wasm"))]
 pub fn get_shell_safe_zed_path(shell_kind: shell::ShellKind) -> anyhow::Result<String> {
     use anyhow::Context as _;
     use paths::PathExt;
@@ -304,6 +310,12 @@ pub fn get_shell_safe_zed_path(shell_kind: shell::ShellKind) -> anyhow::Result<S
     zed_path
         .try_shell_safe(shell_kind)
         .context("Failed to shell-escape Zed executable path.")
+}
+
+/// Returns a shell escaped path for the current zed executable
+#[cfg(target_family = "wasm")]
+pub fn get_shell_safe_zed_path(_shell_kind: shell::ShellKind) -> anyhow::Result<String> {
+    anyhow::bail!("shell escaping is unavailable in WASM")
 }
 
 /// Returns a path for the zed cli executable, this function

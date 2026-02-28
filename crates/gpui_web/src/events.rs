@@ -1,10 +1,10 @@
 use std::rc::Rc;
 
 use gpui::{
-    Capslock, ExternalPaths, FileDropEvent, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers,
-    ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent,
-    MouseUpEvent, NavigationDirection, Pixels, PlatformInput, Point, ScrollDelta, ScrollWheelEvent,
-    TouchPhase, point, px,
+    Capslock, DispatchEventResult, ExternalPaths, FileDropEvent, KeyDownEvent, KeyUpEvent,
+    Keystroke, Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent,
+    MouseMoveEvent, MouseUpEvent, NavigationDirection, Pixels, PlatformInput, Point, ScrollDelta,
+    ScrollWheelEvent, TouchPhase, point, px,
 };
 use smallvec::smallvec;
 use wasm_bindgen::prelude::*;
@@ -109,10 +109,21 @@ impl WebWindowInner {
         closure
     }
 
-    fn dispatch_input(&self, input: PlatformInput) {
+    fn dispatch_input(&self, input: PlatformInput) -> DispatchEventResult {
         let mut borrowed = self.callbacks.borrow_mut();
         if let Some(ref mut callback) = borrowed.input {
-            callback(input);
+            callback(input)
+        } else {
+            DispatchEventResult::default()
+        }
+    }
+
+    fn dispatch_text_input(&self, text: &str) {
+        let mut state = self.state.borrow_mut();
+        if let Some(mut handler) = state.input_handler.take() {
+            drop(state);
+            handler.replace_text_in_range(None, text);
+            self.state.borrow_mut().input_handler = Some(handler);
         }
     }
 
@@ -349,11 +360,20 @@ impl WebWindowInner {
                 key_char,
             };
 
-            this.dispatch_input(PlatformInput::KeyDown(KeyDownEvent {
-                keystroke,
+            let result = this.dispatch_input(PlatformInput::KeyDown(KeyDownEvent {
+                keystroke: keystroke.clone(),
                 is_held,
                 prefer_character_input: false,
             }));
+
+            // If no keybinding consumed the event, dispatch the character to the text
+            // input handler. On native platforms this is done by the OS IME (e.g.
+            // insertText: on macOS), but the web only sends KeyDown events.
+            if result.propagate {
+                if let Some(key_char) = keystroke.key_char {
+                    this.dispatch_text_input(&key_char);
+                }
+            }
         })
     }
 

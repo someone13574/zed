@@ -22,7 +22,8 @@ use crate::rel_path::RelPathBuf;
 pub fn home_dir() -> &'static PathBuf {
     static HOME_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     HOME_DIR.get_or_init(|| {
-        if cfg!(any(test, feature = "test-support")) {
+        #[cfg(any(test, feature = "test-support"))]
+        {
             if cfg!(target_os = "macos") {
                 PathBuf::from("/Users/zed")
             } else if cfg!(target_os = "windows") {
@@ -30,8 +31,16 @@ pub fn home_dir() -> &'static PathBuf {
             } else {
                 PathBuf::from("/home/zed")
             }
-        } else {
+        }
+
+        #[cfg(all(not(any(test, feature = "test-support")), not(target_family = "wasm")))]
+        {
             dirs::home_dir().expect("failed to determine home directory")
+        }
+
+        #[cfg(all(not(any(test, feature = "test-support")), target_family = "wasm"))]
+        {
+            PathBuf::from("/")
         }
     })
 }

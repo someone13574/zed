@@ -34,10 +34,11 @@ use std::{
     ops::{self, Deref, Range, Sub},
     str,
     sync::{Arc, LazyLock},
-    time::{Duration, Instant},
+    time::Duration,
 };
 pub use subscription::*;
 pub use sum_tree::Bias;
+use web_time::Instant;
 use sum_tree::{Dimensions, FilterCursor, SumTree, TreeMap, TreeSet};
 use undo_map::UndoMap;
 use util::debug_panic;

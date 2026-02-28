@@ -19,6 +19,7 @@ test-support = ["git2", "rand", "util_macros"]
 
 [dependencies]
 anyhow.workspace = true
+async-fs.workspace = true
 async_zip.workspace = true
 collections.workspace = true
 dunce = "1.0"
@@ -37,6 +38,7 @@ serde_json_lenient.workspace = true
 shlex.workspace = true
 take-until.workspace = true
 tempfile.workspace = true
+smol.workspace = true
 unicase.workspace = true
 url.workspace = true
 percent-encoding.workspace = true
@@ -44,10 +46,8 @@ util_macros = { workspace = true, optional = true }
 gpui_util.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-smol.workspace = true
 which.workspace = true
 git2 = { workspace = true, optional = true }
-async-fs.workspace = true
 walkdir.workspace = true
 dirs.workspace = true
 

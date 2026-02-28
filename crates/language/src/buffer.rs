@@ -24,6 +24,7 @@ pub use crate::{
 use anyhow::{Context as _, Result};
 use clock::Lamport;
 pub use clock::ReplicaId;
+use web_time::Instant;
 use collections::{HashMap, HashSet};
 use encoding_rs::Encoding;
 use fs::MTime;
@@ -39,6 +40,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use settings::WorktreeId;
 use smallvec::SmallVec;
+#[cfg(not(target_family = "wasm"))]
 use smol::future::yield_now;
 use std::{
     any::Any,
@@ -54,7 +56,7 @@ use std::{
     path::PathBuf,
     rc,
     sync::Arc,
-    time::{Duration, Instant},
+    time::Duration,
     vec,
 };
 use sum_tree::TreeMap;
@@ -70,6 +72,9 @@ use theme::{ActiveTheme as _, SyntaxTheme};
 #[cfg(any(test, feature = "test-support"))]
 use util::RandomCharIter;
 use util::{RangeExt, debug_panic, maybe, paths::PathStyle, rel_path::RelPath};
+
+#[cfg(target_family = "wasm")]
+async fn yield_now() {}
 
 #[cfg(any(test, feature = "test-support"))]
 pub use {tree_sitter_python, tree_sitter_rust, tree_sitter_typescript};

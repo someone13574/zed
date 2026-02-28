@@ -1,17 +1,41 @@
+#[cfg(not(target_family = "wasm"))]
 mod websocket;
+#[cfg(target_family = "wasm")]
+mod websocket {
+    use anyhow::Result;
+    use cloud_api_types::websocket_protocol::MessageToClient;
+    use futures::channel::mpsc;
+    use gpui::{App, Task};
+
+    pub struct Connection;
+
+    impl Connection {
+        pub fn new<T>(_websocket: T) -> Self {
+            Self
+        }
+
+        pub fn spawn(self, _cx: &App) -> (mpsc::UnboundedReceiver<Result<MessageToClient>>, Task<Result<()>>) {
+            let (_tx, rx) = mpsc::unbounded();
+            (rx, Task::ready(Ok(())))
+        }
+    }
+}
 
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
+#[cfg(not(target_family = "wasm"))]
 use cloud_api_types::websocket_protocol::{PROTOCOL_VERSION, PROTOCOL_VERSION_HEADER_NAME};
 pub use cloud_api_types::*;
 use futures::AsyncReadExt as _;
 use gpui::{App, Task};
+#[cfg(not(target_family = "wasm"))]
 use gpui_tokio::Tokio;
 use http_client::http::request;
 use http_client::{AsyncBody, HttpClientWithUrl, HttpRequestExt, Method, Request, StatusCode};
 use parking_lot::RwLock;
 use thiserror::Error;
+#[cfg(not(target_family = "wasm"))]
 use yawc::WebSocket;
 
 use crate::websocket::Connection;
@@ -109,6 +133,7 @@ impl CloudApiClient {
         Ok(serde_json::from_str(&body).context("failed to parse response body")?)
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn connect(&self, cx: &App) -> Result<Task<Result<Connection>>> {
         let mut connect_url = self
             .http_client
@@ -136,6 +161,11 @@ impl CloudApiClient {
 
             Ok(Connection::new(ws))
         }))
+    }
+
+    #[cfg(target_family = "wasm")]
+    pub fn connect(&self, _cx: &App) -> Result<Task<Result<Connection>>> {
+        Ok(Task::ready(Err(anyhow!("cloud websocket connection is unavailable on wasm"))))
     }
 
     pub async fn create_llm_token(

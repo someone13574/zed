@@ -16,7 +16,9 @@ use editor::{
 use file_icons::FileIcons;
 use git;
 use git::status::GitSummary;
+#[cfg(not(target_family = "wasm"))]
 use git_ui;
+#[cfg(not(target_family = "wasm"))]
 use git_ui::file_diff_view::FileDiffView;
 use gpui::{
     Action, AnyElement, App, AsyncWindowContext, Bounds, ClipboardItem, Context, CursorStyle,
@@ -30,6 +32,7 @@ use gpui::{
 };
 use language::DiagnosticSeverity;
 use menu::{Confirm, SelectFirst, SelectLast, SelectNext, SelectPrevious};
+#[cfg(not(target_family = "wasm"))]
 use notifications::status_toast::{StatusToast, ToastIcon};
 use project::{
     Entry, EntryKind, Fs, GitEntry, GitEntryRef, GitTraversal, Project, ProjectEntryId,
@@ -38,6 +41,7 @@ use project::{
     project_settings::GoToDiagnosticSeverityFilter,
 };
 use project_panel_settings::ProjectPanelSettings;
+#[cfg(not(target_family = "wasm"))]
 use rayon::slice::ParallelSliceMut;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -46,7 +50,11 @@ use settings::{
     update_settings_file,
 };
 use smallvec::SmallVec;
-use std::{any::TypeId, time::Instant};
+use std::any::TypeId;
+#[cfg(not(target_family = "wasm"))]
+use std::time::Instant;
+#[cfg(target_family = "wasm")]
+use web_time::Instant;
 use std::{
     cell::OnceCell,
     cmp,
@@ -516,6 +524,7 @@ pub fn init(cx: &mut App) {
             }
         });
 
+        #[cfg(not(target_family = "wasm"))]
         workspace.register_action(|workspace, _: &git::FileHistory, window, cx| {
             // First try to get from project panel if it's focused
             if let Some(panel) = workspace.panel::<ProjectPanel>(cx) {
@@ -680,6 +689,7 @@ impl ProjectPanel {
                         }
                     }
                     project::Event::ActiveEntryChanged(None) => {
+                        #[cfg(not(target_family = "wasm"))]
                         let is_active_item_file_diff_view = this
                             .workspace
                             .upgrade()
@@ -688,6 +698,8 @@ impl ProjectPanel {
                                 item.act_as_type(TypeId::of::<FileDiffView>(), cx).is_some()
                             })
                             .unwrap_or(false);
+                        #[cfg(target_family = "wasm")]
+                        let is_active_item_file_diff_view = false;
                         if !is_active_item_file_diff_view {
                             this.marked_entries.clear();
                         }
@@ -2297,17 +2309,24 @@ impl ProjectPanel {
                 if let Err(e) = task.await {
                     panel
                         .update(cx, |panel, cx| {
-                            let message = format!("Failed to restore {}: {}", file_name, e);
-                            let toast = StatusToast::new(message, cx, |this, _| {
-                                this.icon(ToastIcon::new(IconName::XCircle).color(Color::Error))
-                                    .dismiss_button(true)
-                            });
-                            panel
-                                .workspace
-                                .update(cx, |workspace, cx| {
-                                    workspace.toggle_status_toast(toast, cx);
-                                })
-                                .ok();
+                            #[cfg(not(target_family = "wasm"))]
+                            {
+                                let message = format!("Failed to restore {}: {}", file_name, e);
+                                let toast = StatusToast::new(message, cx, |this, _| {
+                                    this.icon(ToastIcon::new(IconName::XCircle).color(Color::Error))
+                                        .dismiss_button(true)
+                                });
+                                panel
+                                    .workspace
+                                    .update(cx, |workspace, cx| {
+                                        workspace.toggle_status_toast(toast, cx);
+                                    })
+                                    .ok();
+                            }
+                            #[cfg(target_family = "wasm")]
+                            {
+                                eprintln!("Failed to restore {}: {}", file_name, e);
+                            }
                         })
                         .ok();
                 }
@@ -3445,17 +3464,28 @@ impl ProjectPanel {
     fn compare_marked_files(
         &mut self,
         _: &CompareMarkedFiles,
-        window: &mut Window,
-        cx: &mut Context<Self>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
     ) {
-        let selected_files = self.file_abs_paths_to_diff(cx);
-        if let Some((file_path1, file_path2)) = selected_files {
-            self.workspace
-                .update(cx, |workspace, cx| {
-                    FileDiffView::open(file_path1, file_path2, workspace.weak_handle(), window, cx)
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let window = _window;
+            let cx = _cx;
+            let selected_files = self.file_abs_paths_to_diff(cx);
+            if let Some((file_path1, file_path2)) = selected_files {
+                self.workspace
+                    .update(cx, |workspace, cx| {
+                        FileDiffView::open(
+                            file_path1,
+                            file_path2,
+                            workspace.weak_handle(),
+                            window,
+                            cx,
+                        )
                         .detach_and_log_err(cx);
-                })
-                .ok();
+                    })
+                    .ok();
+            }
         }
     }
 
@@ -6075,12 +6105,15 @@ impl ProjectPanel {
             cx.notify();
             return Ok(());
         }
+        #[cfg(not(target_family = "wasm"))]
         let is_active_item_file_diff_view = self
             .workspace
             .upgrade()
             .and_then(|ws| ws.read(cx).active_item(cx))
             .map(|item| item.act_as_type(TypeId::of::<FileDiffView>(), cx).is_some())
             .unwrap_or(false);
+        #[cfg(target_family = "wasm")]
+        let is_active_item_file_diff_view = false;
         if is_active_item_file_diff_view {
             return Ok(());
         }
@@ -7091,7 +7124,10 @@ pub fn par_sort_worktree_entries_with_mode(
     entries: &mut Vec<GitEntry>,
     mode: settings::ProjectPanelSortMode,
 ) {
+    #[cfg(not(target_family = "wasm"))]
     entries.par_sort_by(|lhs, rhs| cmp_with_mode(lhs, rhs, &mode));
+    #[cfg(target_family = "wasm")]
+    entries.sort_by(|lhs, rhs| cmp_with_mode(lhs, rhs, &mode));
 }
 
 #[cfg(test)]

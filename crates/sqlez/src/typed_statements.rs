@@ -1,11 +1,14 @@
+#[cfg(not(target_family = "wasm"))]
 use anyhow::{Context as _, Result};
 
+#[cfg(not(target_family = "wasm"))]
 use crate::{
     bindable::{Bind, Column},
     connection::Connection,
     statement::Statement,
 };
 
+#[cfg(not(target_family = "wasm"))]
 impl Connection {
     /// Prepare a statement which has no bindings and returns nothing.
     ///
@@ -92,5 +95,56 @@ impl Connection {
                 .maybe_row::<C>()
                 .context("Maybe row failed")
         })
+    }
+}
+
+#[cfg(target_family = "wasm")]
+use crate::{
+    bindable::{Bind, Column},
+    connection::Connection,
+};
+
+#[cfg(target_family = "wasm")]
+impl Connection {
+    pub fn exec<'a>(
+        &'a self,
+        _query: &str,
+    ) -> anyhow::Result<impl 'a + FnMut() -> anyhow::Result<()>> {
+        Ok(|| Ok(()))
+    }
+
+    pub fn exec_bound<'a, B: Bind>(
+        &'a self,
+        _query: &str,
+    ) -> anyhow::Result<impl 'a + FnMut(B) -> anyhow::Result<()>> {
+        Ok(|_: B| Ok(()))
+    }
+
+    pub fn select<'a, C: Column>(
+        &'a self,
+        _query: &str,
+    ) -> anyhow::Result<impl 'a + FnMut() -> anyhow::Result<Vec<C>>> {
+        Ok(|| Ok(vec![]))
+    }
+
+    pub fn select_bound<'a, B: Bind, C: Column>(
+        &'a self,
+        _query: &str,
+    ) -> anyhow::Result<impl 'a + FnMut(B) -> anyhow::Result<Vec<C>>> {
+        Ok(|_: B| Ok(vec![]))
+    }
+
+    pub fn select_row<'a, C: Column>(
+        &'a self,
+        _query: &str,
+    ) -> anyhow::Result<impl 'a + FnMut() -> anyhow::Result<Option<C>>> {
+        Ok(|| Ok(None))
+    }
+
+    pub fn select_row_bound<'a, B: Bind, C: Column>(
+        &'a self,
+        _query: &str,
+    ) -> anyhow::Result<impl 'a + FnMut(B) -> anyhow::Result<Option<C>>> {
+        Ok(|_: B| Ok(None))
     }
 }

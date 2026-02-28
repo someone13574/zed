@@ -22,6 +22,8 @@ enum CliCommand {
     PublishGpui(tasks::publish_gpui::PublishGpuiArgs),
     /// Builds GPUI web examples and serves them.
     WebExamples(tasks::web_examples::WebExamplesArgs),
+    /// Builds the main zed crate for wasm and serves it.
+    WebZed(tasks::web_zed::WebZedArgs),
     Workflows(tasks::workflows::GenerateWorkflowArgs),
 }
 
@@ -36,6 +38,7 @@ fn main() -> Result<()> {
         }
         CliCommand::PublishGpui(args) => tasks::publish_gpui::run_publish_gpui(args),
         CliCommand::WebExamples(args) => tasks::web_examples::run_web_examples(args),
+        CliCommand::WebZed(args) => tasks::web_zed::run_web_zed(args),
         CliCommand::Workflows(args) => tasks::workflows::run_workflows(args),
     }
 }

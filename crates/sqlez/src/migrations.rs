@@ -4,14 +4,20 @@
 // to creating a new db?)
 // Otherwise any missing migrations are run on the connection
 
+#[cfg(not(target_family = "wasm"))]
 use std::ffi::CString;
 
+#[cfg(not(target_family = "wasm"))]
 use anyhow::{Context as _, Result};
+#[cfg(not(target_family = "wasm"))]
 use indoc::{formatdoc, indoc};
+#[cfg(not(target_family = "wasm"))]
 use libsqlite3_sys::sqlite3_exec;
 
+#[cfg(not(target_family = "wasm"))]
 use crate::connection::Connection;
 
+#[cfg(not(target_family = "wasm"))]
 impl Connection {
     fn eager_exec(&self, sql: &str) -> anyhow::Result<()> {
         let sql_str = CString::new(sql).context("Error creating cstr")?;

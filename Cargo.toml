@@ -582,7 +582,7 @@ libc = "0.2"
 libsqlite3-sys = { version = "0.30.1", features = ["bundled"] }
 linkify = "0.10.0"
 log = { version = "0.4.16", features = ["kv_unstable_serde", "serde"] }
-lsp-types = { git = "https://github.com/zed-industries/lsp-types", rev = "a4f410987660bf560d1e617cb78117c6b6b9f599" }
+lsp-types = { path = "tooling/vendor/lsp-types" }
 mach2 = "0.5"
 markup5ever_rcdom = "0.3.0"
 metal = "0.33"
@@ -721,7 +721,7 @@ toml_edit = { version = "0.22", default-features = false, features = [
     "serde",
 ] }
 tower-http = "0.4.4"
-tree-sitter = { version = "0.26", features = ["wasm"] }
+tree-sitter = { path = "tooling/vendor/tree-sitter" }
 tree-sitter-bash = "0.25.1"
 tree-sitter-c = "0.24.1"
 tree-sitter-cpp = { git = "https://github.com/tree-sitter/tree-sitter-cpp", rev = "5cb9b693cfd7bfacab1d9ff4acac1a4150700609" }
@@ -835,6 +835,12 @@ notify = { git = "https://github.com/zed-industries/notify.git", rev = "ce58c24c
 notify-types = { git = "https://github.com/zed-industries/notify.git", rev = "ce58c24cad542c28e04ced02e20325a4ec28a31d" }
 windows-capture = { git = "https://github.com/zed-industries/windows-capture.git", rev = "f0d6c1b6691db75461b732f6d5ff56eed002eeb9" }
 calloop = { git = "https://github.com/zed-industries/calloop" }
+tree-sitter-language = { path = "tooling/vendor/tree-sitter-language" }
+errno = { path = "tooling/vendor/errno" }
+polling = { path = "tooling/vendor/polling" }
+smol = { path = "tooling/vendor/smol" }
+home = { path = "tooling/vendor/home" }
+which = { path = "tooling/vendor/which" }
 
 [profile.dev]
 split-debuginfo = "unpacked"

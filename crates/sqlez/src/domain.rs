@@ -19,6 +19,7 @@ impl Migrator for () {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl<D: Domain> Migrator for D {
     fn migrate(connection: &Connection) -> anyhow::Result<()> {
         connection.migrate(
@@ -26,6 +27,13 @@ impl<D: Domain> Migrator for D {
             Self::MIGRATIONS,
             &mut Self::should_allow_migration_change,
         )
+    }
+}
+
+#[cfg(target_family = "wasm")]
+impl<D: Domain> Migrator for D {
+    fn migrate(_connection: &Connection) -> anyhow::Result<()> {
+        Ok(())
     }
 }
 

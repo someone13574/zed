@@ -1,10 +1,13 @@
 use anyhow::{Context as _, Result, anyhow};
+#[cfg(not(target_family = "wasm"))]
 use async_compression::futures::bufread::GzipDecoder;
+#[cfg(not(target_family = "wasm"))]
 use async_tar::Archive;
 use async_trait::async_trait;
 use collections::HashMap;
 pub use dap_types::{StartDebuggingRequestArguments, StartDebuggingRequestArgumentsRequest};
 use fs::Fs;
+#[cfg(not(target_family = "wasm"))]
 use futures::io::BufReader;
 use gpui::{AsyncApp, SharedString};
 pub use http_client::{HttpClient, github::latest_github_release};
@@ -312,9 +315,18 @@ pub async fn download_adapter_from_github(
     delegate.output_to_console("Download complete".to_owned());
     match file_type {
         DownloadedFileType::GzipTar => {
-            let decompressed_bytes = GzipDecoder::new(BufReader::new(response.body_mut()));
-            let archive = Archive::new(decompressed_bytes);
-            archive.unpack(&version_path).await?;
+            #[cfg(not(target_family = "wasm"))]
+            {
+                let decompressed_bytes = GzipDecoder::new(BufReader::new(response.body_mut()));
+                let archive = Archive::new(decompressed_bytes);
+                archive.unpack(&version_path).await?;
+            }
+            #[cfg(target_family = "wasm")]
+            {
+                return Err(anyhow!(
+                    "gzip tar extraction for debug adapters is unavailable on wasm"
+                ));
+            }
         }
         DownloadedFileType::Zip | DownloadedFileType::Vsix => {
             let zip_path = version_path.with_extension("zip");

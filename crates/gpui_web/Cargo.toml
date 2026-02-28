@@ -29,6 +29,7 @@ js-sys = "0.3"
 raw-window-handle = "0.6"
 wasm_thread = { version = "0.3", features = ["es_modules"] }
 web-sys = { version = "0.3", features = [
+    "Blob",
     "console",
     "CssStyleDeclaration",
     "DataTransfer",
@@ -36,9 +37,11 @@ web-sys = { version = "0.3", features = [
     "DomRect",
     "DragEvent",
     "Element",
+    "Event",
     "EventTarget",
     "File",
     "FileList",
+    "HtmlBodyElement",
     "HtmlCanvasElement",
     "HtmlElement",
     "HtmlInputElement",

@@ -1,6 +1,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Cow, fmt, path::Path, sync::LazyLock};
+#[cfg(windows)]
+use std::sync::LazyLock;
+use std::{borrow::Cow, fmt, path::Path};
 
 /// Shell configuration to open the terminal with.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, Hash)]
@@ -66,31 +68,39 @@ pub enum ShellKind {
     Elvish,
 }
 
+#[cfg(not(windows))]
 pub fn get_system_shell() -> String {
-    if cfg!(windows) {
-        get_windows_system_shell()
-    } else {
-        std::env::var("SHELL").unwrap_or("/bin/sh".to_string())
-    }
+    std::env::var("SHELL").unwrap_or("/bin/sh".to_string())
 }
 
+#[cfg(windows)]
+pub fn get_system_shell() -> String {
+    get_windows_system_shell()
+}
+
+#[cfg(not(windows))]
 pub fn get_default_system_shell() -> String {
-    if cfg!(windows) {
-        get_windows_system_shell()
-    } else {
-        "/bin/sh".to_string()
-    }
+    "/bin/sh".to_string()
+}
+
+#[cfg(windows)]
+pub fn get_default_system_shell() -> String {
+    get_windows_system_shell()
 }
 
 /// Get the default system shell, preferring bash on Windows.
+#[cfg(not(windows))]
 pub fn get_default_system_shell_preferring_bash() -> String {
-    if cfg!(windows) {
-        get_windows_bash().unwrap_or_else(|| get_windows_system_shell())
-    } else {
-        "/bin/sh".to_string()
-    }
+    "/bin/sh".to_string()
 }
 
+/// Get the default system shell, preferring bash on Windows.
+#[cfg(windows)]
+pub fn get_default_system_shell_preferring_bash() -> String {
+    get_windows_bash().unwrap_or_else(get_windows_system_shell)
+}
+
+#[cfg(windows)]
 pub fn get_windows_bash() -> Option<String> {
     use std::path::PathBuf;
 
@@ -120,6 +130,12 @@ pub fn get_windows_bash() -> Option<String> {
     (*BASH).clone()
 }
 
+#[cfg(not(windows))]
+pub fn get_windows_bash() -> Option<String> {
+    None
+}
+
+#[cfg(windows)]
 pub fn get_windows_system_shell() -> String {
     use std::path::PathBuf;
 
@@ -231,6 +247,11 @@ pub fn get_windows_system_shell() -> String {
     });
 
     (*SYSTEM_SHELL).clone()
+}
+
+#[cfg(not(windows))]
+pub fn get_windows_system_shell() -> String {
+    "/bin/sh".to_string()
 }
 
 impl fmt::Display for ShellKind {
