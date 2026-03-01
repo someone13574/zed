@@ -45,6 +45,12 @@ pub(crate) struct WebWindowMutableState {
 pub(crate) struct WebWindowInner {
     pub(crate) browser_window: web_sys::Window,
     pub(crate) canvas: web_sys::HtmlCanvasElement,
+    /// Hidden input element that serves as the IME/XIM target. Canvas elements do not
+    /// participate in the OS input method (XIM/IBus) system, so compose sequences and
+    /// IME would never work on a bare canvas. By keeping this input focused, the browser
+    /// provides a proper input context for the OS input method, while the canvas handles
+    /// all rendering and pointer events.
+    pub(crate) input_el: web_sys::HtmlInputElement,
     pub(crate) has_device_pixel_support: bool,
     pub(crate) is_mac: bool,
     pub(crate) state: RefCell<WebWindowMutableState>,
@@ -53,6 +59,9 @@ pub(crate) struct WebWindowInner {
     pub(crate) pressed_button: Cell<Option<MouseButton>>,
     pub(crate) last_physical_size: Cell<(u32, u32)>,
     pub(crate) notify_scale: Cell<bool>,
+    pub(crate) is_composing: Cell<bool>,
+    /// UTF-16 length of text inserted by keydown, to be undone if compositionstart fires.
+    pub(crate) composing_start_undo_utf16_len: Cell<Option<u32>>,
     mql_handle: RefCell<Option<MqlHandle>>,
     pending_physical_size: Cell<Option<(u32, u32)>>,
 }
@@ -89,7 +98,8 @@ impl WebWindow {
         let max_texture_dimension = context.device.limits().max_texture_dimension_2d;
         let has_device_pixel_support = check_device_pixel_support();
 
-        canvas.set_tab_index(0);
+        // Canvas does not need to be in the tab order; the hidden input_el handles focus.
+        canvas.set_tab_index(-1);
 
         let style = canvas.style();
         style
@@ -114,7 +124,30 @@ impl WebWindow {
         body.append_child(&canvas)
             .map_err(|e| anyhow::anyhow!("Failed to append canvas to body: {e:?}"))?;
 
-        canvas.focus().ok();
+        // Create a hidden input element that serves as the XIM/IME target. The OS input
+        // method system (XIM, IBus, etc.) only hooks into real <input>/<textarea> elements,
+        // not canvas. Keyboard and composition events are registered on this element.
+        let input_el: web_sys::HtmlInputElement = document
+            .create_element("input")
+            .map_err(|e| anyhow::anyhow!("Failed to create input element: {e:?}"))?
+            .dyn_into()
+            .map_err(|e| anyhow::anyhow!("Created element is not an input: {e:?}"))?;
+        input_el.set_attribute("type", "text").ok();
+        input_el.set_tab_index(0);
+        let input_style = input_el.style();
+        input_style.set_property("position", "fixed").ok();
+        input_style.set_property("top", "0").ok();
+        input_style.set_property("left", "0").ok();
+        input_style.set_property("width", "1px").ok();
+        input_style.set_property("height", "1px").ok();
+        input_style.set_property("opacity", "0").ok();
+        input_style.set_property("padding", "0").ok();
+        input_style.set_property("border", "none").ok();
+        input_style.set_property("outline", "none").ok();
+        input_style.set_property("overflow", "hidden").ok();
+        body.append_child(&input_el)
+            .map_err(|e| anyhow::anyhow!("Failed to append input to body: {e:?}"))?;
+        input_el.focus().ok();
 
         let device_size = Size {
             width: DevicePixels(0),
@@ -155,6 +188,7 @@ impl WebWindow {
         let inner = Rc::new(WebWindowInner {
             browser_window,
             canvas,
+            input_el,
             has_device_pixel_support,
             is_mac,
             state: RefCell::new(mutable_state),
@@ -163,6 +197,8 @@ impl WebWindow {
             pressed_button: Cell::new(None),
             last_physical_size: Cell::new((0, 0)),
             notify_scale: Cell::new(false),
+            is_composing: Cell::new(false),
+            composing_start_undo_utf16_len: Cell::new(None),
             mql_handle: RefCell::new(None),
             pending_physical_size: Cell::new(None),
         });
@@ -387,6 +423,16 @@ impl WebWindowInner {
             .ok();
 
         Some(closure)
+    }
+
+    pub(crate) fn with_input_handler<R>(
+        &self,
+        f: impl FnOnce(&mut PlatformInputHandler) -> R,
+    ) -> Option<R> {
+        let mut handler = self.state.borrow_mut().input_handler.take()?;
+        let result = f(&mut handler);
+        self.state.borrow_mut().input_handler = Some(handler);
+        Some(result)
     }
 
     pub(crate) fn register_appearance_change(
