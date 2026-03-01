@@ -168,6 +168,118 @@ pub trait Platform: 'static {
         directory: &Path,
         suggested_name: Option<&str>,
     ) -> oneshot::Receiver<Result<Option<PathBuf>>>;
+    fn save_file_as(
+        &self,
+        directory: &Path,
+        suggested_name: Option<&str>,
+        content: Arc<[u8]>,
+    ) -> oneshot::Receiver<Result<Option<PathBuf>>> {
+        let (tx, rx) = oneshot::channel();
+        let path_rx = self.prompt_for_new_path(directory, suggested_name);
+        self.background_executor()
+            .spawn(async move {
+                let result = match path_rx.await {
+                    Ok(Ok(Some(path))) => std::fs::write(&path, &*content)
+                        .map(|_| Some(path))
+                        .map_err(Into::into),
+                    Ok(other) => other,
+                    Err(_) => Err(anyhow::anyhow!("path prompt channel closed")),
+                };
+                tx.send(result).ok();
+            })
+            .detach();
+        rx
+    }
+    /// Opens a file picker, then returns the selected paths and their bytes.
+    ///
+    /// This is equivalent to `prompt_for_paths` followed by reading each file's bytes,
+    /// but is overridable so that web platforms can read bytes from the browser File API
+    /// rather than the filesystem.
+    fn prompt_for_file_bytes(
+        &self,
+        options: PathPromptOptions,
+    ) -> oneshot::Receiver<Result<Option<Vec<(PathBuf, Vec<u8>)>>>> {
+        let (tx, rx) = oneshot::channel();
+        let path_rx = self.prompt_for_paths(options);
+        self.background_executor()
+            .spawn(async move {
+                let result = match path_rx.await {
+                    Ok(Ok(Some(paths))) => {
+                        let mut result = Vec::new();
+                        for path in paths {
+                            match std::fs::read(&path) {
+                                Ok(bytes) => result.push((path, bytes)),
+                                Err(err) => {
+                                    tx.send(Err(err.into())).ok();
+                                    return;
+                                }
+                            }
+                        }
+                        Ok(Some(result))
+                    }
+                    Ok(Ok(None)) => Ok(None),
+                    Ok(Err(e)) => Err(e),
+                    Err(_) => Err(anyhow::anyhow!("path prompt channel closed")),
+                };
+                tx.send(result).ok();
+            })
+            .detach();
+        rx
+    }
+    /// Opens a directory picker, then returns all files in the selected directory with their bytes.
+    ///
+    /// This is overridable so that web platforms can read bytes directly from the browser File API
+    /// (where filesystem access is not available after the picker closes).
+    fn prompt_for_directory(
+        &self,
+    ) -> oneshot::Receiver<Result<Option<Vec<(PathBuf, Vec<u8>)>>>> {
+        let (tx, rx) = oneshot::channel();
+        let path_rx = self.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: None,
+        });
+        self.background_executor()
+            .spawn(async move {
+                let result = match path_rx.await {
+                    Ok(Ok(Some(paths))) => {
+                        let Some(directory) = paths.into_iter().next() else {
+                            tx.send(Ok(None)).ok();
+                            return;
+                        };
+                        let read_dir = match std::fs::read_dir(&directory) {
+                            Ok(read_dir) => read_dir,
+                            Err(err) => {
+                                tx.send(Err(err.into())).ok();
+                                return;
+                            }
+                        };
+                        let mut entries = Vec::new();
+                        for entry in read_dir.flatten() {
+                            let path = entry.path();
+                            if path.is_file() {
+                                match std::fs::read(&path) {
+                                    Ok(bytes) => entries.push((path, bytes)),
+                                    Err(err) => {
+                                        tx.send(Err(err.into())).ok();
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+                        Ok(Some(entries))
+                    }
+                    Ok(Ok(None)) => Ok(None),
+                    Ok(Err(e)) => Err(e),
+                    Err(_) => Err(anyhow::anyhow!("path prompt channel closed")),
+                };
+                tx.send(result).ok();
+            })
+            .detach();
+        rx
+    }
     fn can_select_mixed_files_and_dirs(&self) -> bool;
     fn reveal_path(&self, path: &Path);
     fn open_with_system(&self, path: &Path);

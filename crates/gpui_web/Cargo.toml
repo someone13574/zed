@@ -29,6 +29,7 @@ js-sys = "0.3"
 raw-window-handle = "0.6"
 wasm_thread = { version = "0.3", features = ["es_modules"] }
 web-sys = { version = "0.3", features = [
+    "Blob",
     "console",
     "CompositionEvent",
     "EventTarget",
@@ -43,6 +44,7 @@ web-sys = { version = "0.3", features = [
     "FileList",
     "HtmlCanvasElement",
     "HtmlElement",
+    "HtmlAnchorElement",
     "HtmlInputElement",
     "KeyboardEvent",
     "MediaQueryList",
@@ -57,6 +59,7 @@ web-sys = { version = "0.3", features = [
     "ResizeObserverOptions",
     "Screen",
     "Storage",
+    "Url",
     "VisualViewport",
     "WheelEvent",
     "Window",

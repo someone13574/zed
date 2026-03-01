@@ -1233,6 +1233,27 @@ impl App {
         self.platform.prompt_for_paths(options)
     }
 
+    /// Opens a file picker and returns the selected files' paths and their bytes.
+    ///
+    /// On web, bytes are read directly from the browser File API.
+    /// On desktop, bytes are read from the filesystem after the path is selected.
+    pub fn prompt_for_file_bytes(
+        &self,
+        options: PathPromptOptions,
+    ) -> oneshot::Receiver<Result<Option<Vec<(PathBuf, Vec<u8>)>>>> {
+        self.platform.prompt_for_file_bytes(options)
+    }
+
+    /// Opens a directory picker and returns all files in the selected directory with their bytes.
+    ///
+    /// On web, bytes are read directly from the browser File API (via webkitdirectory).
+    /// On desktop, the directory is read from the filesystem after selection.
+    pub fn prompt_for_directory(
+        &self,
+    ) -> oneshot::Receiver<Result<Option<Vec<(PathBuf, Vec<u8>)>>>> {
+        self.platform.prompt_for_directory()
+    }
+
     /// Displays a platform modal for selecting a new path where a file can be saved.
     ///
     /// The provided directory will be used to set the initial location.
@@ -1245,6 +1266,21 @@ impl App {
         suggested_name: Option<&str>,
     ) -> oneshot::Receiver<Result<Option<PathBuf>>> {
         self.platform.prompt_for_new_path(directory, suggested_name)
+    }
+
+    /// Displays a platform modal for selecting a path, then writes `content` to it.
+    ///
+    /// The provided directory will be used to set the initial location.
+    /// When the file is written, its path is relayed asynchronously via the returned oneshot channel.
+    /// If cancelled, a `None` will be relayed instead.
+    pub fn save_file_as(
+        &self,
+        directory: &Path,
+        suggested_name: Option<&str>,
+        content: std::sync::Arc<[u8]>,
+    ) -> oneshot::Receiver<Result<Option<PathBuf>>> {
+        self.platform
+            .save_file_as(directory, suggested_name, content)
     }
 
     /// Reveals the specified path at the platform level, such as in Finder on macOS.
