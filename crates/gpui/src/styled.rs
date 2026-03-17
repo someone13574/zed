@@ -28,6 +28,7 @@ pub trait Styled: Sized {
     gpui_macros::margin_style_methods!();
     gpui_macros::padding_style_methods!();
     gpui_macros::position_style_methods!();
+    gpui_macros::size_style_methods!();
     gpui_macros::overflow_style_methods!();
     gpui_macros::cursor_style_methods!();
     gpui_macros::border_style_methods!();
