@@ -200,6 +200,10 @@ name = "set_menus"
 path = "examples/set_menus.rs"
 
 [[example]]
+name = "shader"
+path = "examples/shader.rs"
+
+[[example]]
 name = "shadow"
 path = "examples/shadow.rs"
 
