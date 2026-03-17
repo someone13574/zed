@@ -54,7 +54,7 @@ impl Display for CustomShaderInfo {
             pad: u32,
         }}
 
-        var<uniform> globals: GlobalParams;
+        @group(0) @binding(0) var<uniform> globals: GlobalParams;
         {backdrop_code}
 
         fn to_device_position(unit_vertex: vec2<f32>, bounds: Bounds) -> vec2<f32> {{
@@ -89,7 +89,7 @@ impl Display for CustomShaderInfo {
             instances: array<Instance>,
         }}
 
-        var<storage, read> b_instances: Instances;
+        @group(1) @binding(0) var<storage, read> b_instances: Instances;
 
         struct VertexOut {{
             @builtin(position) position: vec4<f32>,
@@ -142,12 +142,4 @@ impl Display for CustomShaderInfo {
         "#
         )
     }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct CustomShaderGlobalParams {
-    pub viewport_size: [f32; 2],
-    pub premultiplied_alpha: u32,
-    pub pad: u32,
 }

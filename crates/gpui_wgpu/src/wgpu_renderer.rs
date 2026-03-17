@@ -1,10 +1,9 @@
 use crate::{CompositorGpuHint, WgpuAtlas, WgpuContext};
 use bytemuck::{Pod, Zeroable};
 use gpui::{
-    AtlasTextureId, Background, Bounds, CustomShaderGlobalParams, CustomShaderId, CustomShaderInfo,
-    DevicePixels, GpuSpecs, MonochromeSprite, Path, Point, PolychromeSprite, PrimitiveBatch, Quad,
-    Result, ScaledPixels, Scene, Shadow, Size, SubpixelSprite, Underline,
-    get_gamma_correction_ratios,
+    AtlasTextureId, Background, Bounds, CustomShaderId, CustomShaderInfo, DevicePixels, GpuSpecs,
+    MonochromeSprite, Path, Point, PolychromeSprite, PrimitiveBatch, Quad, Result, ScaledPixels,
+    Scene, ShaderPrimitive, Shadow, Size, SubpixelSprite, Underline, get_gamma_correction_ratios,
 };
 use log::warn;
 #[cfg(not(target_family = "wasm"))]
@@ -97,7 +96,6 @@ struct WgpuBindGroupLayouts {
     instances: wgpu::BindGroupLayout,
     instances_with_texture: wgpu::BindGroupLayout,
     surfaces: wgpu::BindGroupLayout,
-    custom_global: wgpu::BindGroupLayout,
 }
 
 /// Shared GPU context reference, used to coordinate device recovery across multiple windows.
@@ -593,28 +591,11 @@ impl WgpuRenderer {
             ],
         });
 
-        let custom_global = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("custom_globals"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: NonZeroU64::new(
-                        std::mem::size_of::<CustomShaderGlobalParams>() as u64,
-                    ),
-                },
-                count: None,
-            }],
-        });
-
         WgpuBindGroupLayouts {
             globals,
             instances,
             instances_with_texture,
             surfaces,
-            custom_global,
         }
     }
 
@@ -1251,12 +1232,13 @@ impl WgpuRenderer {
                                 &mut instance_offset,
                                 &mut pass,
                             ),
-                        PrimitiveBatch::Shaders {
-                            read_bounds: _,
-                            range: _,
-                        } => {
-                            todo!()
-                        }
+                        PrimitiveBatch::Shaders { read_bounds, range } => self.draw_custom_shaders(
+                            &scene.shaders[range],
+                            &scene.shader_data,
+                            read_bounds,
+                            &mut instance_offset,
+                            &mut pass,
+                        ),
                         PrimitiveBatch::Surfaces(_surfaces) => {
                             // Surfaces are macOS-only for video playback
                             // Not implemented for Linux/wgpu
@@ -1401,6 +1383,65 @@ impl WgpuRenderer {
             instance_offset,
             pass,
         )
+    }
+
+    fn draw_custom_shaders(
+        &self,
+        instances: &[ShaderPrimitive],
+        shader_data: &[u8],
+        _read_bounds: Option<Bounds<u32>>,
+        instance_offset: &mut u64,
+        pass: &mut wgpu::RenderPass<'_>,
+    ) -> bool {
+        if instances.is_empty() {
+            return true;
+        }
+
+        let resources = self.resources();
+        let (pipeline, instance_data_size, instance_data_align) = resources
+            .pipelines
+            .custom
+            .get(instances[0].shader_id.0 as usize)
+            .expect("Shader not resgistered");
+
+        let (_, instance_size) =
+            ShaderPrimitive::size_info(*instance_data_size, *instance_data_align);
+        let instances_size = NonZeroU64::new((instance_size * instances.len()) as u64).unwrap();
+        let offset = (*instance_offset).next_multiple_of(
+            self.storage_buffer_alignment
+                .max(*instance_data_align as u64),
+        );
+
+        let mut buffer_view = resources
+            .queue
+            .write_buffer_with(&resources.instance_buffer, offset, instances_size)
+            .unwrap();
+        unsafe {
+            ShaderPrimitive::pack_instances(
+                buffer_view.as_mut_ptr(),
+                instances,
+                shader_data,
+                *instance_data_size,
+                *instance_data_align,
+            )
+        };
+        *instance_offset = offset + instances_size.get();
+
+        let bind_group = resources
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &resources.bind_group_layouts.instances,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.instance_binding(offset, instances_size),
+                }],
+            });
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &resources.globals_bind_group, &[]);
+        pass.set_bind_group(1, &bind_group, &[]);
+        pass.draw(0..4, 0..instances.len() as u32);
+        true
     }
 
     fn draw_instances(
@@ -1676,12 +1717,12 @@ impl WgpuRenderer {
                     label: Some(&format!("{id:#?}_layout")),
                     bind_group_layouts: &if info.backdrop_read {
                         [
-                            &resources.bind_group_layouts.custom_global,
+                            &resources.bind_group_layouts.globals,
                             &resources.bind_group_layouts.instances_with_texture,
                         ]
                     } else {
                         [
-                            &resources.bind_group_layouts.custom_global,
+                            &resources.bind_group_layouts.globals,
                             &resources.bind_group_layouts.instances,
                         ]
                     },
