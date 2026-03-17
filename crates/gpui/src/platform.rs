@@ -1,6 +1,7 @@
 mod app_menu;
 mod keyboard;
 mod keystroke;
+mod shader;
 
 #[cfg(all(target_os = "linux", feature = "wayland"))]
 #[expect(missing_docs)]
@@ -68,6 +69,7 @@ use uuid::Uuid;
 pub use app_menu::*;
 pub use keyboard::*;
 pub use keystroke::*;
+pub use shader::*;
 
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use test::*;
@@ -490,6 +492,7 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn draw(&self, scene: &Scene);
     fn completed_frame(&self) {}
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas>;
+    fn register_shader(&self, info: CustomShaderInfo) -> Result<CustomShaderId, (String, bool)>;
     fn is_subpixel_rendering_supported(&self) -> bool;
 
     // macOS specific methods
@@ -958,7 +961,7 @@ impl From<TileId> for etagere::AllocId {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 /// An identifier for a custom shader which can be drawn using [Window::paint_shader]
-pub struct CustomShaderId(pub(crate) u32);
+pub struct CustomShaderId(pub u32);
 
 #[expect(missing_docs)]
 pub struct PlatformInputHandler {

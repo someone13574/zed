@@ -3,7 +3,7 @@ use crate::Inspector;
 use crate::{
     Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
     AsyncWindowContext, AvailableSpace, Background, BorderStyle, Bounds, BoxShadow, Capslock,
-    Context, Corners, CursorStyle, CustomShaderId, Decorations, DevicePixels,
+    Context, Corners, CursorStyle, CustomShaderId, CustomShaderInfo, Decorations, DevicePixels,
     DispatchActionListener, DispatchNodeId, DispatchTree, DisplayId, Edges, Effect, Entity,
     EntityId, EventEmitter, FileDropEvent, FontId, Global, GlobalElementId, GlyphId, GpuSpecs,
     Hsla, InputHandler, IsZero, KeyBinding, KeyContext, KeyDownEvent, KeyEvent, Keystroke,
@@ -3667,6 +3667,30 @@ impl Window {
             },
             data_range,
         });
+    }
+
+    /// Register a custom shader with the graphics system. Refer to
+    /// [crate::FragmentShader] for information on the format of the shader
+    /// code.
+    ///
+    /// If this shader fails to compile, it returns a String containing the
+    /// compilation error message and a boolean indicating whether the shader
+    /// had been previously registered.
+    pub fn register_shader<T: ShaderUniform>(
+        &mut self,
+        main_body: SharedString,
+        extra_items: SmallVec<[SharedString; 4]>,
+        read_enabled: bool,
+    ) -> Result<CustomShaderId, (String, bool)> {
+        self.platform_window.register_shader(CustomShaderInfo {
+            main_body,
+            extra_items,
+            data_name: T::NAME,
+            data_definition: T::DEFINITION,
+            data_size: size_of::<T>(),
+            data_align: T::ALIGN,
+            backdrop_read: read_enabled,
+        })
     }
 
     /// Paint a surface into the scene for the next frame at the current z-index.

@@ -4,7 +4,7 @@ use smallvec::SmallVec;
 
 use crate::{
     App, Bounds, CursorStyle, Edges, Element, ElementId, GlobalElementId, Hitbox,
-    InspectorElementId, InteractiveElement, Interactivity, IntoElement, LayoutId, Pixels,
+    InspectorElementId, InteractiveElement, Interactivity, IntoElement, LayoutId, Pixels, Point,
     SharedString, StyleRefinement, Window, fill, point, rgb,
 };
 
@@ -27,7 +27,7 @@ pub enum ShaderReadAccess {
 /// A custom shader which can be drawn using [shader_element] or [shader_element_with_data].
 #[derive(Clone)]
 pub struct FragmentShader<T: ShaderUniform> {
-    _main_body: SharedString,
+    main_body: SharedString,
     extra_items: SmallVec<[SharedString; 4]>,
     read_access: Option<ShaderReadAccess>,
     _marker: PhantomData<T>,
@@ -59,7 +59,7 @@ impl<T: ShaderUniform> FragmentShader<T> {
     /// will be accessible within the main body.
     pub fn new<S: Into<SharedString>>(main_body: S) -> Self {
         Self {
-            _main_body: main_body.into(),
+            main_body: main_body.into(),
             extra_items: SmallVec::new(),
             read_access: None,
             _marker: PhantomData,
@@ -85,7 +85,33 @@ trait ShaderPass {
 
 impl<T: ShaderUniform> ShaderPass for (FragmentShader<T>, T) {
     fn paint(&self, window: &mut Window, bounds: Bounds<Pixels>) {
-        paint_error_texture(bounds, window);
+        let (shader, data) = &self;
+        match window.register_shader::<T>(
+            shader.main_body.clone(),
+            shader.extra_items.clone(),
+            shader.read_access.is_some(),
+        ) {
+            Ok(shader_id) => {
+                let read_bounds = match shader.read_access {
+                    Some(ShaderReadAccess::Under) => Some(bounds),
+                    Some(ShaderReadAccess::Around(edges)) => Some(bounds.extend(edges)),
+                    Some(ShaderReadAccess::Window) => Some(Bounds {
+                        origin: Point::default(),
+                        size: window.viewport_size,
+                    }),
+                    None => None,
+                };
+
+                window.paint_shader(shader_id, bounds, read_bounds, data);
+            }
+            Err((msg, first_err)) => {
+                paint_error_texture(bounds, window);
+
+                if first_err {
+                    eprintln!("Shader compile error: {msg}");
+                }
+            }
+        }
     }
 }
 

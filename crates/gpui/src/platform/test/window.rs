@@ -4,6 +4,7 @@ use crate::{
     PlatformHeadlessRenderer, PlatformInput, PlatformInputHandler, PlatformWindow, Point,
     PromptButton, RequestFrameOptions, Scene, Size, TestPlatform, TileId, WindowAppearance,
     WindowBackgroundAppearance, WindowBounds, WindowControlArea, WindowParams,
+    platform::shader::CustomShaderInfo,
 };
 use collections::HashMap;
 use image::RgbaImage;
@@ -289,6 +290,13 @@ impl PlatformWindow for TestWindow {
 
     fn sprite_atlas(&self) -> sync::Arc<dyn crate::PlatformAtlas> {
         self.0.lock().sprite_atlas.clone()
+    }
+
+    fn register_shader(
+        &self,
+        _info: CustomShaderInfo,
+    ) -> anyhow::Result<crate::CustomShaderId, (String, bool)> {
+        unimplemented!()
     }
 
     #[cfg(any(test, feature = "test-support"))]

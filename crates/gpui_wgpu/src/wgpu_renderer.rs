@@ -1,17 +1,20 @@
 use crate::{CompositorGpuHint, WgpuAtlas, WgpuContext};
 use bytemuck::{Pod, Zeroable};
 use gpui::{
-    AtlasTextureId, Background, Bounds, DevicePixels, GpuSpecs, MonochromeSprite, Path, Point,
-    PolychromeSprite, PrimitiveBatch, Quad, ScaledPixels, Scene, Shadow, Size, SubpixelSprite,
-    Underline, get_gamma_correction_ratios,
+    AtlasTextureId, Background, Bounds, CustomShaderGlobalParams, CustomShaderId, CustomShaderInfo,
+    DevicePixels, GpuSpecs, MonochromeSprite, Path, Point, PolychromeSprite, PrimitiveBatch, Quad,
+    Result, ScaledPixels, Scene, Shadow, Size, SubpixelSprite, Underline,
+    get_gamma_correction_ratios,
 };
 use log::warn;
 #[cfg(not(target_family = "wasm"))]
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use wgpu::ShaderModuleDescriptor;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -84,6 +87,9 @@ struct WgpuPipelines {
     poly_sprites: wgpu::RenderPipeline,
     #[allow(dead_code)]
     surfaces: wgpu::RenderPipeline,
+
+    custom: Vec<(wgpu::RenderPipeline, usize, usize)>,
+    custom_ids: HashMap<CustomShaderInfo, Result<CustomShaderId, String>>,
 }
 
 struct WgpuBindGroupLayouts {
@@ -91,6 +97,7 @@ struct WgpuBindGroupLayouts {
     instances: wgpu::BindGroupLayout,
     instances_with_texture: wgpu::BindGroupLayout,
     surfaces: wgpu::BindGroupLayout,
+    custom_global: wgpu::BindGroupLayout,
 }
 
 /// Shared GPU context reference, used to coordinate device recovery across multiple windows.
@@ -586,11 +593,28 @@ impl WgpuRenderer {
             ],
         });
 
+        let custom_global = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("custom_globals"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: NonZeroU64::new(
+                        std::mem::size_of::<CustomShaderGlobalParams>() as u64,
+                    ),
+                },
+                count: None,
+            }],
+        });
+
         WgpuBindGroupLayouts {
             globals,
             instances,
             instances_with_texture,
             surfaces,
+            custom_global,
         }
     }
 
@@ -844,6 +868,8 @@ impl WgpuRenderer {
             subpixel_sprites,
             poly_sprites,
             surfaces,
+            custom: Vec::new(),
+            custom_ids: HashMap::new(),
         }
     }
 
@@ -1612,6 +1638,98 @@ impl WgpuRenderer {
             offset,
             size: Some(size),
         })
+    }
+
+    pub fn register_custom_shader(
+        &mut self,
+        info: CustomShaderInfo,
+    ) -> Result<CustomShaderId, (String, bool)> {
+        let color_target = wgpu::ColorTargetState {
+            format: self.surface_config.format,
+            blend: Some(match self.surface_config.alpha_mode {
+                wgpu::CompositeAlphaMode::PreMultiplied => {
+                    wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING
+                }
+                _ => wgpu::BlendState::ALPHA_BLENDING,
+            }),
+            write_mask: wgpu::ColorWrites::ALL,
+        };
+
+        let resources = self.resources_mut();
+        if let Some(id) = resources.pipelines.custom_ids.get(&info) {
+            return id.clone().map_err(|err| (err, false));
+        }
+
+        let id = CustomShaderId(resources.pipelines.custom.len().try_into().unwrap());
+        let source = info.to_string();
+        let shader_module = resources
+            .device
+            .create_shader_module(ShaderModuleDescriptor {
+                label: Some(&format!("{id:?}-shader")),
+                source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Owned(source)),
+            });
+
+        let pipeline_layout =
+            resources
+                .device
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some(&format!("{id:#?}_layout")),
+                    bind_group_layouts: &if info.backdrop_read {
+                        [
+                            &resources.bind_group_layouts.custom_global,
+                            &resources.bind_group_layouts.instances_with_texture,
+                        ]
+                    } else {
+                        [
+                            &resources.bind_group_layouts.custom_global,
+                            &resources.bind_group_layouts.instances,
+                        ]
+                    },
+                    immediate_size: 0,
+                });
+
+        let pipeline = resources
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(&format!("{id:?}")),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader_module,
+                    entry_point: Some("vs"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleStrip,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader_module,
+                    entry_point: Some("fs"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(color_target)],
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+
+        resources
+            .pipelines
+            .custom
+            .push((pipeline, info.data_size, info.data_align));
+        resources.pipelines.custom_ids.insert(info, Ok(id));
+        Ok(id)
     }
 
     pub fn destroy(&mut self) {
