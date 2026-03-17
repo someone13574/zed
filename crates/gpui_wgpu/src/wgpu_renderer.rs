@@ -1225,6 +1225,12 @@ impl WgpuRenderer {
                                 &mut instance_offset,
                                 &mut pass,
                             ),
+                        PrimitiveBatch::Shaders {
+                            read_bounds: _,
+                            range: _,
+                        } => {
+                            todo!()
+                        }
                         PrimitiveBatch::Surfaces(_surfaces) => {
                             // Surfaces are macOS-only for video playback
                             // Not implemented for Linux/wgpu
