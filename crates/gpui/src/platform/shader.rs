@@ -98,7 +98,7 @@ impl Display for CustomShaderInfo {
             @location(2) size: vec2<f32>,
             @location(3) opacity: f32,
             @location(4) scale_factor: f32,
-            @location(5) instance_id: u32,
+            @location(5) @interpolate(flat) instance_id: u32,
         }}
 
         @vertex
