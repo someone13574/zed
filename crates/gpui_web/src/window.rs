@@ -653,6 +653,14 @@ impl PlatformWindow for WebWindow {
         self.inner.state.borrow_mut().renderer.draw(scene);
     }
 
+    fn register_shader(
+        &self,
+        info: gpui::CustomShaderInfo,
+    ) -> gpui::Result<gpui::CustomShaderId, (String, bool)> {
+        let mut state = self.inner.state.borrow_mut();
+        state.renderer.register_custom_shader(info)
+    }
+
     fn completed_frame(&self) {
         // On web, presentation happens automatically via wgpu surface present
     }

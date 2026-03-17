@@ -187,6 +187,10 @@ impl Application {
             let cx = &mut *this.borrow_mut();
             on_finish_launching(cx);
         }));
+
+        #[cfg(target_family = "wasm")]
+        // On the web, Platform::run only does some setup and then exits. This prevents callbacks from being dropped after startup.
+        std::mem::forget(self);
     }
 
     /// Register a handler to be invoked when the platform instructs the application
