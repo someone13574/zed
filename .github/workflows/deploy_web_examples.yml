@@ -1,0 +1,77 @@
+name: Deploy GPUI Web Examples
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build web examples
+    if: github.repository_owner == 'zed-industries'
+    runs-on: namespace-profile-16x32-ubuntu-2204
+    permissions:
+      contents: read
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          clean: false
+
+      - name: Set up default .cargo/config.toml
+        run: |
+          mkdir -p ./../.cargo
+          cp ./.cargo/ci-config.toml ./../.cargo/config.toml
+
+      - name: Cache Rust dependencies
+        uses: namespacelabs/nscloud-cache-action@v1
+        with:
+          cache: rust
+          path: ~/.rustup
+
+      - name: Resolve wasm-bindgen version
+        id: wasm-bindgen-version
+        run: |
+          version="$(grep -E '^wasm-bindgen = "' Cargo.toml | head -n 1 | cut -d '"' -f 2)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install wasm-bindgen-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@${{ steps.wasm-bindgen-version.outputs.version }}
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Build web examples
+        run: cargo xtask web-examples --release --no-serve
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: target/web-examples
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.repository_owner == 'zed-industries'
+    runs-on: namespace-profile-2x4-ubuntu-2404
+    needs: build
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

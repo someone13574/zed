@@ -1,10 +1,12 @@
 #![allow(clippy::disallowed_methods, reason = "tooling is exempt")]
 
+use std::collections::BTreeSet;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
 use anyhow::{Context as _, Result, bail};
+use cargo_toml::Manifest;
 use clap::Parser;
 
 #[derive(Parser)]
@@ -25,15 +27,25 @@ fn check_program(binary: &str, install_hint: &str) -> Result<()> {
 }
 
 fn discover_examples() -> Result<Vec<String>> {
+    let manifest_path = Path::new("crates/gpui/Cargo.toml");
     let examples_dir = Path::new("crates/gpui/examples");
-    let mut names = Vec::new();
+    let mut names = BTreeSet::new();
 
     for entry in std::fs::read_dir(examples_dir).context("failed to read crates/gpui/examples")? {
         let path = entry?.path();
         if path.extension().and_then(|e| e.to_str()) == Some("rs") {
             if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                names.push(stem.to_string());
+                names.insert(stem.to_string());
             }
+        }
+    }
+
+    let manifest = Manifest::from_path(manifest_path)
+        .with_context(|| format!("failed to read {}", manifest_path.display()))?;
+
+    for example in manifest.example {
+        if let Some(name) = example.name {
+            names.insert(name);
         }
     }
 
@@ -41,8 +53,7 @@ fn discover_examples() -> Result<Vec<String>> {
         bail!("no examples found in crates/gpui/examples");
     }
 
-    names.sort();
-    Ok(names)
+    Ok(names.into_iter().collect())
 }
 
 pub fn run_web_examples(args: WebExamplesArgs) -> Result<()> {
