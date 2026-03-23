@@ -86,9 +86,15 @@ struct WgpuPipelines {
     poly_sprites: wgpu::RenderPipeline,
     #[allow(dead_code)]
     surfaces: wgpu::RenderPipeline,
-
-    custom: Vec<(wgpu::RenderPipeline, usize, usize)>,
+    custom: Vec<CustomPipeline>,
     custom_ids: HashMap<CustomShaderInfo, Result<CustomShaderId, String>>,
+}
+
+struct CustomPipeline {
+    pipeline: wgpu::RenderPipeline,
+    instance_data_size: usize,
+    instance_data_align: usize,
+    backdrop_read: bool,
 }
 
 struct WgpuBindGroupLayouts {
@@ -117,6 +123,8 @@ struct WgpuResources {
     path_intermediate_view: Option<wgpu::TextureView>,
     path_msaa_texture: Option<wgpu::Texture>,
     path_msaa_view: Option<wgpu::TextureView>,
+    backdrop_texture: Option<wgpu::Texture>,
+    backdrop_texture_view: Option<wgpu::TextureView>,
 }
 
 pub struct WgpuRenderer {
@@ -321,7 +329,7 @@ impl WgpuRenderer {
         }
 
         let surface_config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             format: surface_format,
             width: clamped_width.max(1),
             height: clamped_height.max(1),
@@ -450,6 +458,8 @@ impl WgpuRenderer {
             path_intermediate_view: None,
             path_msaa_texture: None,
             path_msaa_view: None,
+            backdrop_texture: None,
+            backdrop_texture_view: None,
         };
 
         Ok(Self {
@@ -906,6 +916,123 @@ impl WgpuRenderer {
         Some((texture, view))
     }
 
+    fn create_backdrop_texture(
+        &mut self,
+        format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+    ) -> (wgpu::Texture, wgpu::TextureView) {
+        let texture = self
+            .resources()
+            .device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("backdrop"),
+                size: wgpu::Extent3d {
+                    width: width.max(1),
+                    height: height.max(1),
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        (texture, view)
+    }
+
+    fn ensure_backdrop_texture(&mut self) {
+        if self.resources().backdrop_texture.is_some() {
+            return;
+        }
+
+        let (texture, view) = self.create_backdrop_texture(
+            self.surface_config.format,
+            self.surface_config.width,
+            self.surface_config.height,
+        );
+        self.resources_mut().backdrop_texture = Some(texture);
+        self.resources_mut().backdrop_texture_view = Some(view);
+    }
+
+    fn copy_backdrop(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        frame_texture: &wgpu::Texture,
+        read_bounds: Bounds<u32>,
+    ) {
+        self.ensure_backdrop_texture();
+
+        let bounds = read_bounds.intersect(&Bounds {
+            origin: Point::default(),
+            size: Size {
+                width: self.surface_config.width,
+                height: self.surface_config.height,
+            },
+        });
+
+        if bounds.size.width == 0 || bounds.size.height == 0 {
+            return;
+        }
+
+        let backdrop_texture = self
+            .resources()
+            .backdrop_texture
+            .as_ref()
+            .expect("backdrop texture should exist");
+        encoder.copy_texture_to_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: frame_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d {
+                    x: bounds.origin.x,
+                    y: bounds.origin.y,
+                    z: 0,
+                },
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyTextureInfo {
+                texture: backdrop_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d {
+                    x: bounds.origin.x,
+                    y: bounds.origin.y,
+                    z: 0,
+                },
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::Extent3d {
+                width: bounds.size.width,
+                height: bounds.size.height,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+
+    fn begin_main_pass<'a>(
+        encoder: &'a mut wgpu::CommandEncoder,
+        frame_view: &'a wgpu::TextureView,
+        label: &'static str,
+        load: wgpu::LoadOp<wgpu::Color>,
+    ) -> wgpu::RenderPass<'a> {
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some(label),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: frame_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load,
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: None,
+            ..Default::default()
+        })
+    }
+
     pub fn update_drawable_size(&mut self, size: Size<DevicePixels>) {
         let width = size.width.0 as u32;
         let height = size.height.0 as u32;
@@ -943,6 +1070,9 @@ impl WgpuRenderer {
             if let Some(ref texture) = resources.path_msaa_texture {
                 texture.destroy();
             }
+            if let Some(ref texture) = resources.backdrop_texture {
+                texture.destroy();
+            }
 
             resources
                 .surface
@@ -955,6 +1085,8 @@ impl WgpuRenderer {
             resources.path_intermediate_view = None;
             resources.path_msaa_texture = None;
             resources.path_msaa_view = None;
+            resources.backdrop_texture = None;
+            resources.backdrop_texture_view = None;
         }
     }
 
@@ -1142,20 +1274,12 @@ impl WgpuRenderer {
                     });
 
             {
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("main_pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &frame_view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                            store: wgpu::StoreOp::Store,
-                        },
-                        depth_slice: None,
-                    })],
-                    depth_stencil_attachment: None,
-                    ..Default::default()
-                });
+                let mut pass = Self::begin_main_pass(
+                    &mut encoder,
+                    &frame_view,
+                    "main_pass",
+                    wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                );
 
                 for batch in scene.batches() {
                     let ok = match batch {
@@ -1181,20 +1305,12 @@ impl WgpuRenderer {
                                 &mut instance_offset,
                             );
 
-                            pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                                label: Some("main_pass_continued"),
-                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                    view: &frame_view,
-                                    resolve_target: None,
-                                    ops: wgpu::Operations {
-                                        load: wgpu::LoadOp::Load,
-                                        store: wgpu::StoreOp::Store,
-                                    },
-                                    depth_slice: None,
-                                })],
-                                depth_stencil_attachment: None,
-                                ..Default::default()
-                            });
+                            pass = Self::begin_main_pass(
+                                &mut encoder,
+                                &frame_view,
+                                "main_pass_continued",
+                                wgpu::LoadOp::Load,
+                            );
 
                             if did_draw {
                                 self.draw_paths_from_intermediate(
@@ -1232,13 +1348,26 @@ impl WgpuRenderer {
                                 &mut instance_offset,
                                 &mut pass,
                             ),
-                        PrimitiveBatch::Shaders { read_bounds, range } => self.draw_custom_shaders(
-                            &scene.shaders[range],
-                            &scene.shader_data,
-                            read_bounds,
-                            &mut instance_offset,
-                            &mut pass,
-                        ),
+                        PrimitiveBatch::Shaders { read_bounds, range } => {
+                            if let Some(read_bounds) = read_bounds {
+                                drop(pass);
+                                self.copy_backdrop(&mut encoder, &frame.texture, read_bounds);
+                                pass = Self::begin_main_pass(
+                                    &mut encoder,
+                                    &frame_view,
+                                    "main_pass_continued",
+                                    wgpu::LoadOp::Load,
+                                );
+                            }
+
+                            self.draw_custom_shaders(
+                                &scene.shaders[range],
+                                &scene.shader_data,
+                                read_bounds,
+                                &mut instance_offset,
+                                &mut pass,
+                            )
+                        }
                         PrimitiveBatch::Surfaces(_surfaces) => {
                             // Surfaces are macOS-only for video playback
                             // Not implemented for Linux/wgpu
@@ -1386,7 +1515,7 @@ impl WgpuRenderer {
     }
 
     fn draw_custom_shaders(
-        &self,
+        &mut self,
         instances: &[ShaderPrimitive],
         shader_data: &[u8],
         _read_bounds: Option<Bounds<u32>>,
@@ -1397,19 +1526,41 @@ impl WgpuRenderer {
             return true;
         }
 
-        let resources = self.resources();
-        let (pipeline, instance_data_size, instance_data_align) = resources
+        let shader_index = instances[0].shader_id.0 as usize;
+        let backdrop_read = self
+            .resources()
             .pipelines
             .custom
-            .get(instances[0].shader_id.0 as usize)
-            .expect("Shader not resgistered");
+            .get(shader_index)
+            .expect("Shader not registered")
+            .backdrop_read;
 
-        let (_, instance_size) =
-            ShaderPrimitive::size_info(*instance_data_size, *instance_data_align);
+        if backdrop_read {
+            self.ensure_backdrop_texture();
+        }
+
+        let resources = self.resources();
+        let custom_pipeline = resources
+            .pipelines
+            .custom
+            .get(shader_index)
+            .expect("Shader not registered");
+
+        let backdrop = custom_pipeline.backdrop_read.then(|| {
+            (
+                resources.backdrop_texture.as_ref().unwrap(),
+                resources.backdrop_texture_view.as_ref().unwrap(),
+            )
+        });
+
+        let (_, instance_size) = ShaderPrimitive::size_info(
+            custom_pipeline.instance_data_size,
+            custom_pipeline.instance_data_align,
+        );
         let instances_size = NonZeroU64::new((instance_size * instances.len()) as u64).unwrap();
         let offset = (*instance_offset).next_multiple_of(
             self.storage_buffer_alignment
-                .max(*instance_data_align as u64),
+                .max(custom_pipeline.instance_data_align as u64),
         );
 
         let mut buffer_view = resources
@@ -1421,23 +1572,56 @@ impl WgpuRenderer {
                 buffer_view.as_mut_ptr(),
                 instances,
                 shader_data,
-                *instance_data_size,
-                *instance_data_align,
+                custom_pipeline.instance_data_size,
+                custom_pipeline.instance_data_align,
             )
         };
         *instance_offset = offset + instances_size.get();
 
-        let bind_group = resources
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &resources.bind_group_layouts.instances,
-                entries: &[wgpu::BindGroupEntry {
+        let bind_group_layout = if custom_pipeline.backdrop_read {
+            &resources.bind_group_layouts.instances_with_texture
+        } else {
+            &resources.bind_group_layouts.instances
+        };
+
+        let bind_group = if let Some((_, backdrop_view)) = backdrop {
+            let entries = [
+                wgpu::BindGroupEntry {
                     binding: 0,
                     resource: self.instance_binding(offset, instances_size),
-                }],
-            });
-        pass.set_pipeline(pipeline);
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(backdrop_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&resources.atlas_sampler),
+                },
+            ];
+
+            resources
+                .device
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: None,
+                    layout: bind_group_layout,
+                    entries: &entries,
+                })
+        } else {
+            let entries = [wgpu::BindGroupEntry {
+                binding: 0,
+                resource: self.instance_binding(offset, instances_size),
+            }];
+
+            resources
+                .device
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: None,
+                    layout: bind_group_layout,
+                    entries: &entries,
+                })
+        };
+        pass.set_pipeline(&custom_pipeline.pipeline);
         pass.set_bind_group(0, &resources.globals_bind_group, &[]);
         pass.set_bind_group(1, &bind_group, &[]);
         pass.draw(0..4, 0..instances.len() as u32);
@@ -1765,10 +1949,12 @@ impl WgpuRenderer {
                 cache: None,
             });
 
-        resources
-            .pipelines
-            .custom
-            .push((pipeline, info.data_size, info.data_align));
+        resources.pipelines.custom.push(CustomPipeline {
+            pipeline,
+            instance_data_size: info.data_size,
+            instance_data_align: info.data_align,
+            backdrop_read: info.backdrop_read,
+        });
         resources.pipelines.custom_ids.insert(info, Ok(id));
         Ok(id)
     }

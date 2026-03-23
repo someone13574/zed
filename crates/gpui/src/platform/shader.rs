@@ -24,7 +24,9 @@ impl Display for CustomShaderInfo {
 
         let backdrop_code = if self.backdrop_read {
             "
+            @group(1) @binding(1)
             var t_backdrop: texture_2d<f32>;
+            @group(1) @binding(2)
             var s_backdrop: sampler;
 
             fn sample_backdrop(position: vec2<f32>, scale_factor: f32) -> vec4<f32> {
@@ -141,5 +143,44 @@ impl Display for CustomShaderInfo {
         }}
         "#
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use smallvec::SmallVec;
+
+    use super::CustomShaderInfo;
+
+    fn shader_info(backdrop_read: bool) -> CustomShaderInfo {
+        CustomShaderInfo {
+            main_body: "return vec4<f32>(1.0);".into(),
+            extra_items: SmallVec::new(),
+            data_name: "f32",
+            data_definition: None,
+            data_size: 0,
+            data_align: 4,
+            backdrop_read,
+        }
+    }
+
+    #[test]
+    fn emits_backdrop_bindings_for_backdrop_shaders() {
+        let source = shader_info(true).to_string();
+
+        assert!(source.contains("@group(1) @binding(1)"));
+        assert!(source.contains("var t_backdrop: texture_2d<f32>;"));
+        assert!(source.contains("@group(1) @binding(2)"));
+        assert!(source.contains("var s_backdrop: sampler;"));
+        assert!(source.contains("fn sample_backdrop("));
+    }
+
+    #[test]
+    fn omits_backdrop_bindings_for_regular_shaders() {
+        let source = shader_info(false).to_string();
+
+        assert!(!source.contains("t_backdrop"));
+        assert!(!source.contains("s_backdrop"));
+        assert!(!source.contains("sample_backdrop"));
     }
 }

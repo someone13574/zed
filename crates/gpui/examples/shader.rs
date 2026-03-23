@@ -4,8 +4,8 @@ use std::{f32::consts::PI, time::Duration};
 
 use gpui::{
     AbsoluteLength, Animation, AnimationExt, App, Bounds, Context, FragmentShader, Length, Radians,
-    Rgba, ShaderUniform, Window, WindowBounds, WindowOptions, div, prelude::*, px, radians,
-    relative, rgb, shader_element, shader_element_with_data, size,
+    Rgba, ShaderReadAccess, ShaderUniform, Window, WindowBounds, WindowOptions, div, prelude::*,
+    px, radians, relative, rgb, shader_element, shader_element_with_data, size,
 };
 use gpui_platform::application;
 
@@ -108,6 +108,16 @@ impl Render for ShaderExample {
                     ))
                     .size_40()
                     .cursor_crosshair(),
+                )
+                .child(
+                    div()
+                        .child(Blur {
+                            radius: 15,
+                            sigma: 15.0 * 0.85,
+                        })
+                        .absolute()
+                        .w_full()
+                        .h(relative(0.2)),
                 )
             },
         )
@@ -214,9 +224,107 @@ impl RenderOnce for Star {
     }
 }
 
+#[derive(IntoElement)]
+pub struct Blur {
+    pub radius: usize,
+    pub sigma: f32,
+}
+
+#[repr(C)]
+#[derive(ShaderUniform, Clone, Copy)]
+struct BlurData {
+    direction: [f32; 2],
+    offsets: F32Array,
+    weights: F32Array,
+    samples: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct F32Array([f32; 64]);
+
+unsafe impl ShaderUniform for F32Array {
+    const NAME: &str = "array<f32, 64>";
+    const DEFINITION: Option<&str> = None;
+    const ALIGN: usize = 4;
+}
+
+impl RenderOnce for Blur {
+    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        let blur_shader = FragmentShader::new(
+            "
+            var result = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+            var sum = 0.0;
+
+            for (var i = 0u; i < data.samples; i++) {
+                let offset = data.direction * vec2<f32>(data.offsets[i], data.offsets[i]);
+                let pos = position + offset;
+                let weight = data.weights[i];
+
+                if all(pos > bounds.origin) && all(pos < bounds.origin + bounds.size) {
+                    result += sample_backdrop(position + offset, scale_factor) * weight;
+                    sum += weight;
+                }
+            }
+
+            return result / sum;
+        ",
+        )
+        .read_access(Some(ShaderReadAccess::Under));
+
+        assert!(self.radius <= 31);
+
+        let mut offsets = [0f32; 64];
+        let mut weights = [0f32; 64];
+        let samples = 2 * self.radius + 1;
+        let mut sum = 0f32;
+
+        for idx in 0..samples {
+            let pos = idx as i32 - self.radius as i32;
+            let weight = (-(pos as f32 * pos as f32) / (self.sigma * self.sigma)).exp();
+            offsets[idx] = pos as f32;
+            weights[idx] = weight;
+            sum += weight;
+        }
+
+        if sum != 0.0 {
+            for idx in 0..samples {
+                weights[idx] /= sum;
+            }
+        }
+
+        div()
+            .flex()
+            .size_full()
+            .justify_center()
+            .items_center()
+            .child(
+                shader_element_with_data(
+                    blur_shader.clone(),
+                    BlurData {
+                        direction: [0.0, 1.0],
+                        offsets: F32Array(offsets),
+                        weights: F32Array(weights),
+                        samples: samples as u32,
+                    },
+                )
+                .chain_with_data(
+                    blur_shader,
+                    BlurData {
+                        direction: [1.0, 0.0],
+                        offsets: F32Array(offsets),
+                        weights: F32Array(weights),
+                        samples: samples as u32,
+                    },
+                )
+                .size_64(),
+            )
+    }
+}
+
 fn run_example() {
     application().run(|cx: &mut App| {
-        let bounds = Bounds::centered(None, size(px(500.), px(500.0)), cx);
+        let bounds = Bounds::centered(None, size(px(1200.), px(800.0)), cx);
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
