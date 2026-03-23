@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - main
+      - shader-deploy
 
 concurrency:
   group: github-pages
@@ -13,8 +13,7 @@ concurrency:
 jobs:
   build:
     name: Build web examples
-    if: github.repository_owner == 'zed-industries'
-    runs-on: namespace-profile-16x32-ubuntu-2204
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     env:
@@ -30,11 +29,8 @@ jobs:
           mkdir -p ./../.cargo
           cp ./.cargo/ci-config.toml ./../.cargo/config.toml
 
-      - name: Cache Rust dependencies
-        uses: namespacelabs/nscloud-cache-action@v1
-        with:
-          cache: rust
-          path: ~/.rustup
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
 
       - name: Resolve wasm-bindgen version
         id: wasm-bindgen-version
@@ -61,8 +57,7 @@ jobs:
 
   deploy:
     name: Deploy to GitHub Pages
-    if: github.repository_owner == 'zed-industries'
-    runs-on: namespace-profile-2x4-ubuntu-2404
+    runs-on: ubuntu-latest
     needs: build
     permissions:
       contents: read
